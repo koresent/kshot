@@ -278,24 +278,28 @@ impl Annotation {
                 color,
                 thickness,
             } => {
-                if points.len() < 2 {
+                if points.is_empty() {
                     return;
                 }
                 let mut pb = PathBuilder::new();
                 pb.move_to(points[0].0, points[0].1);
-                for pt in &points[1..] {
-                    pb.line_to(pt.0, pt.1);
+                if points.len() == 1 {
+                    pb.line_to(points[0].0 + 0.1, points[0].1);
+                } else {
+                    for pt in &points[1..] {
+                        pb.line_to(pt.0, pt.1);
+                    }
                 }
                 if let Some(path) = pb.finish() {
                     let mut paint = Paint::default();
-                    // Multiply mode with ~40% opacity mimics highlighters perfectly
-                    paint.set_color_rgba8(color.0, color.1, color.2, 110);
-                    paint.blend_mode = BlendMode::Multiply;
+                    // Vibrant translucent highlight visible on both light and dark backgrounds
+                    paint.set_color_rgba8(color.0, color.1, color.2, 130);
+                    paint.blend_mode = BlendMode::SourceOver;
                     paint.anti_alias = true;
                     let stroke = Stroke {
-                        width: *thickness * 3.5,
-                        line_cap: LineCap::Square,
-                        line_join: LineJoin::Bevel,
+                        width: (*thickness * 3.5 + 14.0).max(18.0),
+                        line_cap: LineCap::Round,
+                        line_join: LineJoin::Round,
                         ..Default::default()
                     };
                     pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);

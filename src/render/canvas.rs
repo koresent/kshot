@@ -151,42 +151,25 @@ impl Canvas {
 
     fn render_active_text(&self, target: &mut Pixmap, input: &ActiveTextInput) {
         let text_w = measure_text_width(&input.text, input.font_size, None);
-        let box_w = (text_w + 24.0).max(64.0);
-        let box_h = input.font_size * 1.35;
-        let box_x = input.x - 4.0;
-        let box_y = input.y - 4.0;
 
-        // Background box
-        if let Some(r) = tiny_skia::Rect::from_xywh(box_x, box_y, box_w, box_h) {
-            let mut bg_paint = Paint::default();
-            bg_paint.set_color_rgba8(40, 40, 40, 210); // Gruvbox dark
-            target.fill_rect(r, &bg_paint, Transform::identity(), None);
-
-            let path = PathBuilder::from_rect(r);
-            let mut border_paint = Paint::default();
-            border_paint.set_color_rgba8(input.color.0, input.color.1, input.color.2, 220);
-            let stroke = Stroke { width: 1.5, ..Default::default() };
-            target.stroke_path(&path, &border_paint, &stroke, Transform::identity(), None);
-        }
-
-        // Text content
+        // Render pure clean text directly with transparent background (1:1 Flameshot parity)
         if !input.text.is_empty() {
             render_text(
                 target,
                 &input.text,
-                input.x + 2.0,
-                input.y + 2.0,
+                input.x,
+                input.y,
                 input.font_size,
                 input.color,
                 None,
             );
         }
 
-        // Blinking cursor |
+        // Blinking caret cursor '|'
         if input.cursor_visible {
-            let cursor_x = input.x + text_w + 3.0;
+            let cursor_x = input.x + text_w + 1.0;
             let cursor_y = input.y;
-            if let Some(cr) = tiny_skia::Rect::from_xywh(cursor_x, cursor_y, 2.0, input.font_size) {
+            if let Some(cr) = tiny_skia::Rect::from_xywh(cursor_x, cursor_y, 2.0, input.font_size * 1.1) {
                 let mut cp = Paint::default();
                 cp.set_color_rgba8(input.color.0, input.color.1, input.color.2, 255);
                 target.fill_rect(cr, &cp, Transform::identity(), None);
@@ -339,8 +322,8 @@ impl Canvas {
                 render_text(
                     &mut full_rendered,
                     &input.text,
-                    input.x + 2.0,
-                    input.y + 2.0,
+                    input.x,
+                    input.y,
                     input.font_size,
                     input.color,
                     None,

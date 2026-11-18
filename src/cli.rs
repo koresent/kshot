@@ -100,7 +100,7 @@ pub struct AreaArgs {
 #[derive(Args, Debug, Clone, Default)]
 pub struct PinArgs {
     /// Path to image file to pin
-    #[arg(short, long)]
+    #[arg(value_name = "FILE")]
     pub file: PathBuf,
 }
 
@@ -134,6 +134,16 @@ mod tests {
             assert!(screen.edit);
         } else {
             panic!("Expected Screen command");
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_pin() {
+        let args = Cli::parse_from(["kshot", "pin", "/tmp/test.png"]);
+        if let Some(Commands::Pin(pin)) = args.command {
+            assert_eq!(pin.file, PathBuf::from("/tmp/test.png"));
+        } else {
+            panic!("Expected Pin command");
         }
     }
 }
