@@ -180,30 +180,31 @@ impl ToolbarManager {
         accent_color: (u8, u8, u8),
     ) {
         if selection.is_none() || selection.unwrap().is_empty() {
-            // Draw top hint banner
-            let banner_w = 480.0;
-            let banner_h = 32.0;
+            // Draw top hint banner with rounded corners
+            let banner_w = 560.0;
+            let banner_h = 36.0;
             let bx = (pixmap.width() as f32 - banner_w) * 0.5;
-            let by = 20.0;
+            let by = 24.0;
+            let radius = 8.0;
 
-            if let Some(r) = tiny_skia::Rect::from_xywh(bx, by, banner_w, banner_h) {
-                let p = PathBuilder::from_rect(r);
+            if let Some(path) = rounded_rect_path(bx, by, banner_w, banner_h, radius) {
                 let mut paint = Paint::default();
-                paint.set_color_rgba8(40, 40, 40, 220); // Gruvbox bg0_h
+                paint.set_color_rgba8(40, 40, 40, 235); // Gruvbox bg0_h
                 paint.anti_alias = true;
-                pixmap.fill_path(&p, &paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
+                pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
 
                 let mut bp = Paint::default();
-                bp.set_color_rgba8(254, 128, 25, 200); // Gruvbox orange
+                bp.set_color_rgba8(254, 128, 25, 220); // Gruvbox orange
+                bp.anti_alias = true;
                 let stroke = Stroke { width: 1.5, ..Default::default() };
-                pixmap.stroke_path(&p, &bp, &stroke, Transform::identity(), None);
+                pixmap.stroke_path(&path, &bp, &stroke, Transform::identity(), None);
 
                 render_text(
                     pixmap,
-                    "Select region • Double-click for full screen • Esc to cancel",
-                    bx + 16.0,
-                    by + 21.0,
-                    13.0,
+                    "Select area • Double-click full screen • Esc / Right-click to exit",
+                    bx + 20.0,
+                    by + 23.0,
+                    12.5,
                     (235, 219, 178, 255),
                     None,
                 );
@@ -247,4 +248,19 @@ impl ToolbarManager {
             }
         }
     }
+}
+
+pub fn rounded_rect_path(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<tiny_skia::Path> {
+    let mut pb = PathBuilder::new();
+    pb.move_to(x + r, y);
+    pb.line_to(x + w - r, y);
+    pb.quad_to(x + w, y, x + w, y + r);
+    pb.line_to(x + w, y + h - r);
+    pb.quad_to(x + w, y + h, x + w - r, y + h);
+    pb.line_to(x + r, y + h);
+    pb.quad_to(x, y + h, x, y + h - r);
+    pb.line_to(x, y + r);
+    pb.quad_to(x, y, x + r, y);
+    pb.close();
+    pb.finish()
 }

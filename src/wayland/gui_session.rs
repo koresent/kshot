@@ -57,6 +57,7 @@ pub struct GuiSession {
     pub shm_buffers: Option<[ShmBuffer; 2]>,
     pub current_buf_idx: usize,
     pub render_buffer: Option<Pixmap>,
+    pub last_click: Option<(std::time::Instant, f32, f32)>,
     pub running: Arc<AtomicBool>,
 }
 
@@ -128,6 +129,7 @@ impl GuiSession {
             shm_buffers: None,
             current_buf_idx: 0,
             render_buffer: Pixmap::new(w, h),
+            last_click: None,
             running,
         }
     }
@@ -570,7 +572,35 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                             }
                         }
 
-                        // 3. Check Inside Selection
+                        // 3. Check Double Click for Full Screen
+                        let now = std::time::Instant::now();
+                        let is_double_click = if let Some((prev_time, prev_x, prev_y)) = state.last_click {
+                            now.duration_since(prev_time).as_millis() < 350
+                                && (px - prev_x).abs() < 5.0
+                                && (py - prev_y).abs() < 5.0
+                        } else {
+                            false
+                        };
+
+                        if is_double_click {
+                            state.canvas.selection = Some(SelectionRect::new(
+                                0.0,
+                                0.0,
+                                state.width as f32,
+                                state.height as f32,
+                            ));
+                            state.toolbar.update_layout(
+                                state.canvas.selection.as_ref(),
+                                state.width as f32,
+                                state.height as f32,
+                            );
+                            state.last_click = None;
+                            state.render_frame(qh);
+                            return;
+                        }
+                        state.last_click = Some((now, px, py));
+
+                        // 4. Check Inside Selection or Create New Selection
                         let inside_sel = state.canvas.selection.as_ref().map(|s| s.contains(px, py)).unwrap_or(false);
 
                         if state.active_tool == ToolType::Selection {
@@ -677,12 +707,11 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for GuiSession {
             wl_keyboard::Event::Key { key, state: key_state, .. } => {
                 let pressed = key_state == WEnum::Value(wl_keyboard::KeyState::Pressed);
 
-                // Evdev key codes:
-                // Esc = 1, Enter = 28, Space = 57, A = 30, S = 31, R = 19, C = 46,
-                // P = 25, M = 50, T = 20, N = 49, B = 48, I = 23, Z = 44, Y = 21
+                // Evdev: Esc = 1, Q = 16, Enter = 28, Space = 57, A = 30, S = 31, R = 19, C = 46, Z = 44, Y = 21
+                // XKB (+8): Esc = 9, Q = 24, Enter = 36, Space = 65, A = 38, S = 39, R = 27, C = 54, Z = 52, Y = 29
                 match key {
-                    42 | 54 => state.shift_held = pressed, // Shift
-                    29 | 97 => state.ctrl_held = pressed,  // Ctrl
+                    42 | 54 | 50 | 62 => state.shift_held = pressed, // Shift
+                    29 | 97 | 37 | 105 => state.ctrl_held = pressed, // Ctrl
                     _ => {}
                 }
 
@@ -691,7 +720,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for GuiSession {
                 }
 
                 match key {
-                    1 => {
+                    1 | 9 => {
                         // Escape: clear selection or exit
                         if state.canvas.selection.is_some() {
                             state.canvas.selection = None;
@@ -700,17 +729,17 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for GuiSession {
                             return;
                         }
                     }
-                    16 => {
+                    16 | 24 => {
                         // Q / q: exit immediately
                         state.running.store(false, Ordering::SeqCst);
                         return;
                     }
-                    28 => {
+                    28 | 36 => {
                         // Enter: confirm & export
                         state.finish_and_export(true, false);
                         return;
                     }
-                    46 if state.ctrl_held => {
+                    46 | 54 if state.ctrl_held => {
                         // Ctrl+C: copy & exit if selection, otherwise cancel & exit
                         if state.canvas.selection.is_some() {
                             state.finish_and_export(true, false);
@@ -719,12 +748,12 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for GuiSession {
                         }
                         return;
                     }
-                    31 if state.ctrl_held => {
+                    31 | 39 if state.ctrl_held => {
                         // Ctrl+S: save & exit
                         state.finish_and_export(false, true);
                         return;
                     }
-                    44 if state.ctrl_held => {
+                    44 | 52 if state.ctrl_held => {
                         // Ctrl+Z: undo / Ctrl+Shift+Z: redo
                         if state.shift_held {
                             state.canvas.annotations.redo();
@@ -732,11 +761,11 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for GuiSession {
                             state.canvas.annotations.undo();
                         }
                     }
-                    21 if state.ctrl_held => {
+                    21 | 29 if state.ctrl_held => {
                         // Ctrl+Y: redo
                         state.canvas.annotations.redo();
                     }
-                    30 if state.ctrl_held => {
+                    30 | 38 if state.ctrl_held => {
                         // Ctrl+A: select all
                         state.canvas.selection = Some(SelectionRect::new(
                             0.0,

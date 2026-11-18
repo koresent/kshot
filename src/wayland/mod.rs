@@ -106,6 +106,7 @@ pub fn run_gui(
         if event_queue.blocking_dispatch(&mut session).is_err() {
             break;
         }
+        let _ = conn.flush();
     }
 
     Ok(())

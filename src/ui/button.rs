@@ -58,8 +58,8 @@ impl UiButton {
     pub fn new(id: ButtonId, radius: f32) -> Self {
         Self {
             id,
-            center_x: 0.0,
-            center_y: 0.0,
+            center_x: -1000.0,
+            center_y: -1000.0,
             radius,
             is_active: false,
             is_hovered: false,
