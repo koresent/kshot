@@ -216,18 +216,20 @@ fn default_shortcuts() -> HashMap<String, String> {
     m.insert("selection".to_string(), "s".to_string());
     m.insert("arrow".to_string(), "a".to_string());
     m.insert("rectangle".to_string(), "r".to_string());
+    m.insert("rect_filled".to_string(), "f".to_string());
     m.insert("circle".to_string(), "c".to_string());
     m.insert("pencil".to_string(), "p".to_string());
     m.insert("marker".to_string(), "m".to_string());
     m.insert("text".to_string(), "t".to_string());
     m.insert("counter".to_string(), "n".to_string());
     m.insert("pixelate".to_string(), "b".to_string());
+    m.insert("blur".to_string(), "u".to_string());
     m.insert("invert".to_string(), "i".to_string());
     m.insert("copy".to_string(), "ctrl+c".to_string());
     m.insert("save".to_string(), "ctrl+s".to_string());
     m.insert("pin".to_string(), "space".to_string());
     m.insert("undo".to_string(), "ctrl+z".to_string());
-    m.insert("redo".to_string(), "ctrl+shift+z".to_string());
+    m.insert("redo".to_string(), "ctrl+y".to_string());
     m.insert("select_all".to_string(), "ctrl+a".to_string());
     m.insert("cancel".to_string(), "escape".to_string());
     m.insert("confirm".to_string(), "enter".to_string());
@@ -244,6 +246,25 @@ impl Default for ShortcutsConfig {
 }
 
 impl Config {
+    pub fn matches_shortcut(&self, action: &str, current_shortcut: &str) -> bool {
+        if let Some(binding) = self.shortcuts.bindings.get(action) {
+            if binding.eq_ignore_ascii_case(current_shortcut) {
+                return true;
+            }
+        }
+        match action {
+            "undo" => current_shortcut == "ctrl+z",
+            "redo" => current_shortcut == "ctrl+y" || current_shortcut == "ctrl+shift+z",
+            "copy" => current_shortcut == "ctrl+c",
+            "save" => current_shortcut == "ctrl+s",
+            "pin" => current_shortcut == "space",
+            "select_all" => current_shortcut == "ctrl+a",
+            "cancel" => current_shortcut == "escape",
+            "confirm" => current_shortcut == "enter",
+            _ => false,
+        }
+    }
+
     pub fn config_path() -> PathBuf {
         if let Some(config_dir) = dirs::config_dir() {
             config_dir.join("kshot").join("config.yaml")
@@ -335,5 +356,22 @@ mod tests {
         assert_eq!(parse_hex_color("#cc241d"), Some((204, 36, 29, 255)));
         assert_eq!(parse_hex_color("#fe801980"), Some((254, 128, 25, 128)));
         assert_eq!(parse_hex_color("invalid"), None);
+    }
+
+    #[test]
+    fn test_shortcuts_matching() {
+        let mut cfg = Config::default();
+        assert!(cfg.matches_shortcut("undo", "ctrl+z"));
+        assert!(cfg.matches_shortcut("redo", "ctrl+y"));
+        assert!(cfg.matches_shortcut("redo", "ctrl+shift+z"));
+        assert!(cfg.matches_shortcut("copy", "ctrl+c"));
+        assert!(cfg.matches_shortcut("save", "ctrl+s"));
+        assert!(cfg.matches_shortcut("pin", "space"));
+        assert!(cfg.matches_shortcut("cancel", "escape"));
+        assert!(cfg.matches_shortcut("selection", "s"));
+
+        // Custom override via YAML
+        cfg.shortcuts.bindings.insert("undo".to_string(), "ctrl+alt+z".to_string());
+        assert!(cfg.matches_shortcut("undo", "ctrl+alt+z"));
     }
 }

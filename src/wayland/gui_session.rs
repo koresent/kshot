@@ -341,6 +341,46 @@ fn parse_region_geometry(reg: &str) -> Option<SelectionRect> {
     }
 }
 
+fn get_key_name(key: u32, xkb_state: Option<&xkbcommon::xkb::State>) -> Option<String> {
+    if let Some(xkb) = xkb_state {
+        let keycode = xkbcommon::xkb::Keycode::new(key + 8);
+        let sym = xkb.key_get_one_sym(keycode);
+        let name = xkbcommon::xkb::keysym_get_name(sym).to_lowercase();
+        let normalized = match name.as_str() {
+            "return" => "enter",
+            "kp_enter" => "enter",
+            "escape" => "escape",
+            "space" => "space",
+            "backspace" => "backspace",
+            _ => &name,
+        };
+        return Some(normalized.to_string());
+    }
+
+    let name = match key {
+        1 => "escape",
+        16 => "q",
+        28 => "enter",
+        57 => "space",
+        44 => "z",
+        21 => "y",
+        46 => "c",
+        31 => "s",
+        30 => "a",
+        19 => "r",
+        33 => "f",
+        25 => "p",
+        50 => "m",
+        20 => "t",
+        49 => "n",
+        48 => "b",
+        22 => "u",
+        23 => "i",
+        _ => return None,
+    };
+    Some(name.to_string())
+}
+
 impl Dispatch<wl_registry::WlRegistry, ()> for GuiSession {
     fn event(
         state: &mut Self,
@@ -904,11 +944,20 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for GuiSession {
             wl_keyboard::Event::Key { key, state: key_state, .. } => {
                 let pressed = key_state == WEnum::Value(wl_keyboard::KeyState::Pressed);
 
-                // Evdev: Esc = 1, Q = 16, Enter = 28, Space = 57, A = 30, S = 31, R = 19, C = 46, Z = 44, Y = 21
-                // XKB (+8): Esc = 9, Q = 24, Enter = 36, Space = 65, A = 38, S = 39, R = 27, C = 54, Z = 52, Y = 29
+                // Track modifier keys exclusively without triggering actions
+                // Evdev: LeftCtrl = 29, RightCtrl = 97, LeftShift = 42, RightShift = 54, LeftAlt = 56, RightAlt = 100
                 match key {
-                    42 | 54 | 50 | 62 => state.shift_held = pressed, // Shift
-                    29 | 97 | 37 | 105 => state.ctrl_held = pressed, // Ctrl
+                    29 | 97 => {
+                        state.ctrl_held = pressed;
+                        return;
+                    }
+                    42 | 54 => {
+                        state.shift_held = pressed;
+                        return;
+                    }
+                    56 | 100 | 125 | 126 => {
+                        return;
+                    }
                     _ => {}
                 }
 
@@ -925,19 +974,19 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for GuiSession {
                         .map(|s| s.key_get_one_sym(keycode).raw())
                         .unwrap_or(0);
 
-                    if keysym_val == xkbcommon::xkb::keysyms::KEY_Escape || key == 1 || key == 9 {
+                    if keysym_val == xkbcommon::xkb::keysyms::KEY_Escape || key == 1 {
                         state.canvas.active_text_input = None;
                         state.queue_render(qh);
                         return;
                     }
 
-                    if keysym_val == xkbcommon::xkb::keysyms::KEY_Return || key == 28 || key == 36 {
+                    if keysym_val == xkbcommon::xkb::keysyms::KEY_Return || key == 28 {
                         state.commit_active_text();
                         state.queue_render(qh);
                         return;
                     }
 
-                    if keysym_val == xkbcommon::xkb::keysyms::KEY_BackSpace || key == 14 || key == 22 {
+                    if keysym_val == xkbcommon::xkb::keysyms::KEY_BackSpace || key == 14 {
                         if let Some(ref mut input) = state.canvas.active_text_input {
                             input.text.pop();
                         }
@@ -957,121 +1006,155 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for GuiSession {
                     }
                 }
 
-                match key {
-                    1 | 9 => {
-                        // Escape: close color wheel, clear selection, or exit
-                        if state.color_wheel.visible {
-                            state.color_wheel.hide();
-                        } else if state.canvas.selection.is_some() {
-                            state.canvas.selection = None;
-                        } else {
-                            state.running.store(false, Ordering::SeqCst);
-                            return;
-                        }
-                    }
-                    16 | 24 => {
-                        // Q / q: exit immediately
+                // Resolve key name for configurable shortcut matching
+                let key_name = get_key_name(key, state.xkb_state.as_ref()).unwrap_or_default();
+                let mut current_shortcut = String::new();
+                if state.ctrl_held {
+                    current_shortcut.push_str("ctrl+");
+                }
+                if state.shift_held {
+                    current_shortcut.push_str("shift+");
+                }
+                current_shortcut.push_str(&key_name);
+
+                // 1. Actions (Undo, Redo, Copy, Save, Cancel, Confirm, Pin, Select All)
+                let is_undo = state.config.matches_shortcut("undo", &current_shortcut)
+                    || (state.ctrl_held && !state.shift_held && (key == 44 || key_name == "z" || key_name == "я"));
+
+                let is_redo = state.config.matches_shortcut("redo", &current_shortcut)
+                    || (state.ctrl_held && (key == 21 || key_name == "y" || key_name == "н" || (state.shift_held && (key == 44 || key_name == "z" || key_name == "я"))));
+
+                let is_copy = state.config.matches_shortcut("copy", &current_shortcut)
+                    || (state.ctrl_held && (key == 46 || key_name == "c" || key_name == "с"));
+
+                let is_save = state.config.matches_shortcut("save", &current_shortcut)
+                    || (state.ctrl_held && (key == 31 || key_name == "s" || key_name == "ы"));
+
+                let is_select_all = state.config.matches_shortcut("select_all", &current_shortcut)
+                    || (state.ctrl_held && (key == 30 || key_name == "a" || key_name == "ф"));
+
+                let is_cancel = state.config.matches_shortcut("cancel", &current_shortcut)
+                    || key == 1
+                    || key_name == "escape"
+                    || (!state.ctrl_held && (key == 16 || key_name == "q"));
+
+                let is_confirm = state.config.matches_shortcut("confirm", &current_shortcut)
+                    || key == 28
+                    || key_name == "enter";
+
+                let is_pin = state.config.matches_shortcut("pin", &current_shortcut)
+                    || (!state.ctrl_held && (key == 57 || key_name == "space"));
+
+                if is_cancel {
+                    if state.color_wheel.visible {
+                        state.color_wheel.hide();
+                    } else if state.canvas.selection.is_some() {
+                        state.canvas.selection = None;
+                    } else {
                         state.running.store(false, Ordering::SeqCst);
                         return;
                     }
-                    28 | 36 => {
-                        // Enter: confirm & export
+                } else if is_confirm {
+                    state.finish_and_export(true, false);
+                    return;
+                } else if is_copy {
+                    if state.canvas.selection.is_some() {
                         state.finish_and_export(true, false);
-                        return;
+                    } else {
+                        state.running.store(false, Ordering::SeqCst);
                     }
-                    46 | 54 if state.ctrl_held => {
-                        // Ctrl+C: copy & exit if selection, otherwise cancel & exit
-                        if state.canvas.selection.is_some() {
-                            state.finish_and_export(true, false);
-                        } else {
-                            state.running.store(false, Ordering::SeqCst);
+                    return;
+                } else if is_save {
+                    state.finish_and_export(false, true);
+                    return;
+                } else if is_undo {
+                    state.canvas.annotations.undo();
+                } else if is_redo {
+                    state.canvas.annotations.redo();
+                } else if is_pin {
+                    if let Some(cropped) = state.canvas.get_cropped_frame() {
+                        if let Ok(bytes) = cropped.to_png_bytes() {
+                            let tmp_path = format!("/tmp/kshot_pin_{}.png", std::process::id());
+                            if std::fs::write(&tmp_path, &bytes).is_ok() {
+                                let _ = std::process::Command::new("kshot")
+                                    .args(["pin", &tmp_path])
+                                    .spawn();
+                                state.running.store(false, Ordering::SeqCst);
+                                return;
+                            }
                         }
-                        return;
                     }
-                    31 | 39 if state.ctrl_held => {
-                        // Ctrl+S: save & exit
-                        state.finish_and_export(false, true);
-                        return;
-                    }
-                    44 | 52 if state.ctrl_held => {
-                        // Ctrl+Z: undo / Ctrl+Shift+Z: redo
-                        if state.shift_held {
-                            state.canvas.annotations.redo();
-                        } else {
-                            state.canvas.annotations.undo();
-                        }
-                    }
-                    21 | 29 if state.ctrl_held => {
-                        // Ctrl+Y: redo
-                        state.canvas.annotations.redo();
-                    }
-                    30 | 38 if state.ctrl_held => {
-                        // Ctrl+A: select all
-                        state.canvas.selection = Some(SelectionRect::new(
-                            0.0,
-                            0.0,
-                            state.width as f32,
-                            state.height as f32,
-                        ));
-                        state.toolbar.update_layout(
-                            state.canvas.selection.as_ref(),
-                            state.width as f32,
-                            state.height as f32,
-                        );
-                    }
-                    // Tool shortcuts (without Ctrl)
-                    30 if !state.ctrl_held => {
-                        state.active_tool = ToolType::Arrow;
-                        state.toolbar.set_active_tool(ButtonId::ToolArrow);
-                    }
-                    31 if !state.ctrl_held => {
+                } else if is_select_all {
+                    state.canvas.selection = Some(SelectionRect::new(
+                        0.0,
+                        0.0,
+                        state.width as f32,
+                        state.height as f32,
+                    ));
+                    state.toolbar.update_layout(
+                        state.canvas.selection.as_ref(),
+                        state.width as f32,
+                        state.height as f32,
+                    );
+                } else if !state.ctrl_held {
+                    // 2. Tool switches (configurable via YAML shortcuts.bindings)
+                    if state.config.matches_shortcut("selection", &current_shortcut) || key == 31 || key_name == "s" {
                         state.active_tool = ToolType::Selection;
                         state.toolbar.set_active_tool(ButtonId::ToolSelection);
-                    }
-                    19 if !state.ctrl_held => {
+                    } else if state.config.matches_shortcut("arrow", &current_shortcut) || key == 30 || key_name == "a" {
+                        state.active_tool = ToolType::Arrow;
+                        state.toolbar.set_active_tool(ButtonId::ToolArrow);
+                    } else if state.config.matches_shortcut("rectangle", &current_shortcut) || key == 19 || key_name == "r" {
                         state.active_tool = ToolType::Rectangle;
                         state.toolbar.set_active_tool(ButtonId::ToolRectangle);
-                    }
-                    46 if !state.ctrl_held => {
+                    } else if state.config.matches_shortcut("rect_filled", &current_shortcut) || key == 33 || key_name == "f" {
+                        state.active_tool = ToolType::RectFilled;
+                        state.toolbar.set_active_tool(ButtonId::ToolRectFilled);
+                    } else if state.config.matches_shortcut("circle", &current_shortcut) || key == 46 || key_name == "c" {
                         state.active_tool = ToolType::Circle;
                         state.toolbar.set_active_tool(ButtonId::ToolCircle);
-                    }
-                    25 if !state.ctrl_held => {
+                    } else if state.config.matches_shortcut("pencil", &current_shortcut) || key == 25 || key_name == "p" {
                         state.active_tool = ToolType::Pencil;
                         state.toolbar.set_active_tool(ButtonId::ToolPencil);
-                    }
-                    50 if !state.ctrl_held => {
+                    } else if state.config.matches_shortcut("marker", &current_shortcut) || key == 50 || key_name == "m" {
                         state.active_tool = ToolType::Marker;
                         state.toolbar.set_active_tool(ButtonId::ToolMarker);
-                    }
-                    20 if !state.ctrl_held => {
+                    } else if state.config.matches_shortcut("text", &current_shortcut) || key == 20 || key_name == "t" {
                         state.active_tool = ToolType::Text;
                         state.toolbar.set_active_tool(ButtonId::ToolText);
+                    } else if state.config.matches_shortcut("counter", &current_shortcut) || key == 49 || key_name == "n" {
+                        state.active_tool = ToolType::Counter;
+                        state.toolbar.set_active_tool(ButtonId::ToolCounter);
+                    } else if state.config.matches_shortcut("pixelate", &current_shortcut) || key == 48 || key_name == "b" {
+                        state.active_tool = ToolType::Pixelate;
+                        state.toolbar.set_active_tool(ButtonId::ToolPixelate);
+                    } else if state.config.matches_shortcut("blur", &current_shortcut) || key == 22 || key_name == "u" {
+                        state.active_tool = ToolType::Blur;
+                        state.toolbar.set_active_tool(ButtonId::ToolBlur);
                     }
-                    // Arrow Keys: Nudge selection
+                }
+
+                // 3. Arrow Keys: Nudge selection
+                match key {
                     103 => {
-                        // Up
                         if let Some(ref mut sel) = state.canvas.selection {
                             let step = if state.shift_held { 10.0 } else { 1.0 };
                             sel.nudge(0.0, -step, state.width as f32, state.height as f32);
                         }
                     }
                     108 => {
-                        // Down
                         if let Some(ref mut sel) = state.canvas.selection {
                             let step = if state.shift_held { 10.0 } else { 1.0 };
                             sel.nudge(0.0, step, state.width as f32, state.height as f32);
                         }
                     }
                     105 => {
-                        // Left
                         if let Some(ref mut sel) = state.canvas.selection {
                             let step = if state.shift_held { 10.0 } else { 1.0 };
                             sel.nudge(-step, 0.0, state.width as f32, state.height as f32);
                         }
                     }
                     106 => {
-                        // Right
                         if let Some(ref mut sel) = state.canvas.selection {
                             let step = if state.shift_held { 10.0 } else { 1.0 };
                             sel.nudge(step, 0.0, state.width as f32, state.height as f32);
