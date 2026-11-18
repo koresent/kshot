@@ -4,9 +4,16 @@ pub mod redact;
 pub use arrow::{build_arrow_geometry, ArrowStyle};
 pub use redact::{apply_blur, apply_invert, apply_pixelate};
 
+use std::sync::LazyLock;
 use tiny_skia::{
     BlendMode, LineCap, LineJoin, Paint, PathBuilder, Pixmap, Stroke, Transform,
 };
+
+pub static DEFAULT_FONT_BYTES: &[u8] = include_bytes!("../../../assets/fonts/JetBrainsMono-Bold.ttf");
+pub static DEFAULT_FONT: LazyLock<fontdue::Font> = LazyLock::new(|| {
+    fontdue::Font::from_bytes(DEFAULT_FONT_BYTES, fontdue::FontSettings::default())
+        .expect("Failed to parse embedded default font")
+});
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -393,10 +400,15 @@ pub fn render_text(
     if text.is_empty() {
         return;
     }
-    let font_bytes = font_data.unwrap_or(include_bytes!("../../../assets/fonts/JetBrainsMono-Bold.ttf"));
-    let font = match fontdue::Font::from_bytes(font_bytes, fontdue::FontSettings::default()) {
-        Ok(f) => f,
-        Err(_) => return,
+    let font_owned;
+    let font: &fontdue::Font = if let Some(bytes) = font_data {
+        font_owned = match fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()) {
+            Ok(f) => Some(f),
+            Err(_) => return,
+        };
+        font_owned.as_ref().unwrap()
+    } else {
+        &DEFAULT_FONT
     };
 
     let mut cur_x = x;
@@ -454,10 +466,15 @@ pub fn render_text_centered(
     color: (u8, u8, u8, u8),
     font_data: Option<&[u8]>,
 ) {
-    let font_bytes = font_data.unwrap_or(include_bytes!("../../../assets/fonts/JetBrainsMono-Bold.ttf"));
-    let font = match fontdue::Font::from_bytes(font_bytes, fontdue::FontSettings::default()) {
-        Ok(f) => f,
-        Err(_) => return,
+    let font_owned;
+    let font: &fontdue::Font = if let Some(bytes) = font_data {
+        font_owned = match fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()) {
+            Ok(f) => Some(f),
+            Err(_) => return,
+        };
+        font_owned.as_ref().unwrap()
+    } else {
+        &DEFAULT_FONT
     };
 
     let mut total_width = 0.0;
@@ -467,7 +484,7 @@ pub fn render_text_centered(
     }
 
     let start_x = center_x - total_width * 0.5;
-    let start_y = center_y - font_size * 0.45;
+    let start_y = center_y - font_size * 0.55;
 
     render_text(pixmap, text, start_x, start_y, font_size, color, font_data);
 }
@@ -516,5 +533,36 @@ impl AnnotationStack {
 
     pub fn items(&self) -> &[Annotation] {
         &self.undo_stack
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_banner_text_rendering() {
+        let mut pixmap = Pixmap::new(600, 100).unwrap();
+        let text = "Select area • Double-click full screen • Esc / Right-click to exit";
+        let banner_w = 560.0;
+        let banner_h = 36.0;
+        let bx = 20.0;
+        let by = 24.0;
+        let cx = bx + banner_w * 0.5;
+        let cy = by + banner_h * 0.5;
+        render_text_centered(&mut pixmap, text, cx, cy, 12.0, (235, 219, 178, 255), None);
+        let mut min_y = 100;
+        let mut max_y = 0;
+        for y in 0..100 {
+            for x in 0..600 {
+                let a = pixmap.pixel(x, y).unwrap().alpha();
+                if a > 0 {
+                    if y < min_y { min_y = y; }
+                    if y > max_y { max_y = y; }
+                }
+            }
+        }
+        assert!(min_y >= by as u32);
+        assert!(max_y <= (by + banner_h) as u32);
     }
 }

@@ -203,11 +203,12 @@ impl GuiSession {
         // Convert RGBA (tiny-skia) to ARGB8888 (Wayland wl_shm little-endian: [B, G, R, A])
         let src = render_buf.data();
         let dst = target_pixmap.data_mut();
-        for (s, d) in src.chunks_exact(4).zip(dst.chunks_exact_mut(4)) {
-            d[0] = s[2]; // Blue
-            d[1] = s[1]; // Green
-            d[2] = s[0]; // Red
-            d[3] = s[3]; // Alpha
+        let num_pixels = src.len() / 4;
+        let src_u32 = unsafe { std::slice::from_raw_parts(src.as_ptr() as *const u32, num_pixels) };
+        let dst_u32 = unsafe { std::slice::from_raw_parts_mut(dst.as_mut_ptr() as *mut u32, num_pixels) };
+        for (s, d) in src_u32.iter().zip(dst_u32.iter_mut()) {
+            let px = *s;
+            *d = (px & 0xFF00FF00) | ((px & 0x00FF0000) >> 16) | ((px & 0x000000FF) << 16);
         }
 
         // Attach, damage, frame callback & commit to Wayland surface

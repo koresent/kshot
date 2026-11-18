@@ -51,15 +51,14 @@ pub fn render_magnifier(
     // 1. Draw Gruvbox Card Background
     let card_rect = tiny_skia::Rect::from_xywh(card_x, card_y, card_w, card_h);
     if let Some(cr) = card_rect {
-        let path = PathBuilder::from_rect(cr);
-
         // Fill background
         let mut bg_paint = Paint::default();
         bg_paint.set_color_rgba8(40, 40, 40, 245); // Gruvbox dark
-        bg_paint.anti_alias = true;
-        canvas.fill_path(&path, &bg_paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
+        bg_paint.anti_alias = false;
+        canvas.fill_rect(cr, &bg_paint, Transform::identity(), None);
 
         // Card border
+        let path = PathBuilder::from_rect(cr);
         let mut border_paint = Paint::default();
         border_paint.set_color_rgba8(254, 128, 25, 230); // Gruvbox orange
         border_paint.anti_alias = true;
@@ -100,10 +99,10 @@ pub fn render_magnifier(
             let px_y = grid_start_y + (gy as f32 * pixel_zoom as f32);
 
             if let Some(r_rect) = tiny_skia::Rect::from_xywh(px_x, px_y, pixel_zoom as f32, pixel_zoom as f32) {
-                let p = PathBuilder::from_rect(r_rect);
                 let mut p_paint = Paint::default();
                 p_paint.set_color_rgba8(r, g, b, 255);
-                canvas.fill_path(&p, &p_paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
+                p_paint.anti_alias = false;
+                canvas.fill_rect(r_rect, &p_paint, Transform::identity(), None);
             }
         }
     }
@@ -128,11 +127,11 @@ pub fn render_magnifier(
 
     // Small color badge
     if let Some(swatch_rect) = tiny_skia::Rect::from_xywh(grid_start_x, info_start_y + 2.0, 14.0, 14.0) {
-        let p = PathBuilder::from_rect(swatch_rect);
         let mut sp = Paint::default();
         sp.set_color_rgba8(center_pixel_color.0, center_pixel_color.1, center_pixel_color.2, 255);
-        canvas.fill_path(&p, &sp, tiny_skia::FillRule::Winding, Transform::identity(), None);
+        canvas.fill_rect(swatch_rect, &sp, Transform::identity(), None);
 
+        let p = PathBuilder::from_rect(swatch_rect);
         let mut b_paint = Paint::default();
         b_paint.set_color_rgba8(235, 219, 178, 200);
         let stroke = Stroke { width: 1.0, ..Default::default() };

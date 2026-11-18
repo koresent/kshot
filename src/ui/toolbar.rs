@@ -181,8 +181,8 @@ impl ToolbarManager {
     ) {
         if selection.is_none() || selection.unwrap().is_empty() {
             // Draw top hint banner with rounded corners
-            let banner_w = 560.0;
-            let banner_h = 36.0;
+            let banner_w = 600.0;
+            let banner_h = 38.0;
             let bx = (pixmap.width() as f32 - banner_w) * 0.5;
             let by = 24.0;
             let radius = 8.0;
