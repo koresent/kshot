@@ -40,7 +40,7 @@ pub struct GeneralConfig {
     pub show_notifications: bool,
     #[serde(default = "default_dim_opacity")]
     pub dim_opacity: u8,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_false")]
     pub magnifier_enabled: bool,
     #[serde(default = "default_magnifier_zoom")]
     pub magnifier_zoom: u32,
@@ -57,8 +57,11 @@ fn default_filename_pattern() -> String {
 fn default_true() -> bool {
     true
 }
+fn default_false() -> bool {
+    false
+}
 fn default_dim_opacity() -> u8 {
-    175
+    115
 }
 fn default_magnifier_zoom() -> u32 {
     8
@@ -76,7 +79,7 @@ impl Default for GeneralConfig {
             close_after_action: true,
             show_notifications: true,
             dim_opacity: default_dim_opacity(),
-            magnifier_enabled: true,
+            magnifier_enabled: false,
             magnifier_zoom: default_magnifier_zoom(),
             magnifier_size: default_magnifier_size(),
         }
@@ -112,32 +115,32 @@ fn default_foreground() -> String {
     "#ebdbb2".to_string()
 }
 fn default_accent() -> String {
-    "#fe8019".to_string()
+    "#b8bb26".to_string()
 }
 fn default_selection_border() -> String {
-    "#fabd2f".to_string()
+    "#b8bb26".to_string()
 }
 fn default_handle_color() -> String {
-    "#fe8019".to_string()
+    "#b8bb26".to_string()
 }
 fn default_font_family() -> String {
     "JetBrainsMono Nerd Font".to_string()
 }
 fn default_draw_color() -> String {
-    "#cc241d".to_string()
+    "#b8bb26".to_string()
 }
 fn default_thickness() -> u32 {
     3
 }
 fn default_swatches() -> Vec<String> {
     vec![
-        "#cc241d".to_string(), // Red
-        "#98971a".to_string(), // Green
-        "#d79921".to_string(), // Yellow
-        "#458588".to_string(), // Blue
-        "#b16286".to_string(), // Purple
-        "#689d6a".to_string(), // Aqua
-        "#fe8019".to_string(), // Orange
+        "#b8bb26".to_string(), // Gruvbox Green
+        "#fabd2f".to_string(), // Gruvbox Yellow
+        "#fe8019".to_string(), // Gruvbox Orange
+        "#fb4934".to_string(), // Gruvbox Red
+        "#d3869b".to_string(), // Gruvbox Purple
+        "#83a598".to_string(), // Gruvbox Blue
+        "#8ec07c".to_string(), // Gruvbox Aqua
         "#ebdbb2".to_string(), // Light Foreground
         "#282828".to_string(), // Dark Background
         "#928374".to_string(), // Gray
@@ -323,8 +326,8 @@ mod tests {
         assert!(yaml.contains("swatches:"));
 
         let deserialized: Config = serde_yaml::from_str(&yaml).expect("Deserialization failed");
-        assert_eq!(deserialized.general.dim_opacity, 175);
-        assert_eq!(deserialized.theme.accent, "#fe8019");
+        assert_eq!(deserialized.general.dim_opacity, 115);
+        assert_eq!(deserialized.theme.accent, "#b8bb26");
     }
 
     #[test]

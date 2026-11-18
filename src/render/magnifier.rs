@@ -1,6 +1,7 @@
 use crate::render::tools::render_text;
 use tiny_skia::{Paint, PathBuilder, Pixmap, Stroke, Transform};
 
+#[allow(dead_code)]
 pub struct MagnifierConfig {
     pub zoom: u32,
     pub grid_size: u32,
@@ -15,6 +16,7 @@ impl Default for MagnifierConfig {
     }
 }
 
+#[allow(dead_code)]
 pub fn render_magnifier(
     canvas: &mut Pixmap,
     source_frame: &Pixmap,

@@ -1,8 +1,7 @@
 use crate::capture::CaptureFrame;
 use crate::config::Config;
-use crate::render::magnifier::{render_magnifier, MagnifierConfig};
 use crate::render::selection::SelectionRect;
-use crate::render::tools::{render_text, Annotation, AnnotationStack};
+use crate::render::tools::{Annotation, AnnotationStack};
 use crate::ui::ToolbarManager;
 use tiny_skia::{Paint, PathBuilder, Pixmap, Stroke, Transform};
 
@@ -14,12 +13,10 @@ pub struct Canvas {
     pub annotations: AnnotationStack,
     pub in_progress_annotation: Option<Annotation>,
     pub cursor_pos: Option<(i32, i32)>,
-    pub show_magnifier: bool,
-    pub magnifier_cfg: MagnifierConfig,
 }
 
 impl Canvas {
-    pub fn new(frame: CaptureFrame, config: &Config) -> Self {
+    pub fn new(frame: CaptureFrame, _config: &Config) -> Self {
         let w = frame.width;
         let h = frame.height;
         Self {
@@ -30,11 +27,6 @@ impl Canvas {
             annotations: AnnotationStack::new(),
             in_progress_annotation: None,
             cursor_pos: None,
-            show_magnifier: config.general.magnifier_enabled,
-            magnifier_cfg: MagnifierConfig {
-                zoom: config.general.magnifier_zoom,
-                grid_size: config.general.magnifier_size,
-            },
         }
     }
 
@@ -90,7 +82,7 @@ impl Canvas {
             self.render_dimming_mask(target, dim_alpha);
         }
 
-        // 5. Render Selection Box Border, Handles, and Geometry Badge
+        // 5. Render Selection Box Border and 8 Handles
         if let Some(ref sel) = self.selection {
             if !sel.is_empty() {
                 self.render_selection_overlay(target, sel, config);
@@ -100,77 +92,12 @@ impl Canvas {
         // 6. Render Floating Toolbars
         let accent = crate::config::parse_hex_color(&config.theme.accent)
             .map(|(r, g, b, _)| (r, g, b))
-            .unwrap_or((254, 128, 25));
+            .unwrap_or((184, 187, 38));
         toolbar.render(target, self.selection.as_ref(), accent);
-
-        // 7. Render Magnifier Loupe if cursor is active and selection is empty or dragging
-        if self.show_magnifier {
-            if let Some((cx, cy)) = self.cursor_pos {
-                let should_show = self.selection.is_none()
-                    || self.selection.as_ref().map(|s| s.is_empty()).unwrap_or(true);
-                if should_show {
-                    render_magnifier(target, &self.base_frame.pixmap, cx, cy, &self.magnifier_cfg);
-                }
-            }
-        }
-
-        // 8. Render Precision Crosshair Cursor
-        if let Some((cx, cy)) = self.cursor_pos {
-            Self::render_crosshair(target, cx as f32, cy as f32);
-        }
     }
-
-fn render_crosshair(target: &mut Pixmap, cx: f32, cy: f32) {
-    let mut dark_paint = Paint::default();
-    dark_paint.set_color_rgba8(20, 20, 20, 220);
-    dark_paint.anti_alias = false;
-
-    let mut light_paint = Paint::default();
-    light_paint.set_color_rgba8(235, 219, 178, 255);
-    light_paint.anti_alias = false;
-
-    let len = 12.0;
-    let gap = 3.0;
-
-    // Horizontal
-    if let Some(r) = tiny_skia::Rect::from_xywh(cx - len - gap, cy - 1.0, len, 3.0) {
-        target.fill_rect(r, &dark_paint, Transform::identity(), None);
-    }
-    if let Some(r) = tiny_skia::Rect::from_xywh(cx + gap, cy - 1.0, len, 3.0) {
-        target.fill_rect(r, &dark_paint, Transform::identity(), None);
-    }
-    if let Some(r) = tiny_skia::Rect::from_xywh(cx - len - gap, cy, len, 1.0) {
-        target.fill_rect(r, &light_paint, Transform::identity(), None);
-    }
-    if let Some(r) = tiny_skia::Rect::from_xywh(cx + gap, cy, len, 1.0) {
-        target.fill_rect(r, &light_paint, Transform::identity(), None);
-    }
-
-    // Vertical
-    if let Some(r) = tiny_skia::Rect::from_xywh(cx - 1.0, cy - len - gap, 3.0, len) {
-        target.fill_rect(r, &dark_paint, Transform::identity(), None);
-    }
-    if let Some(r) = tiny_skia::Rect::from_xywh(cx - 1.0, cy + gap, 3.0, len) {
-        target.fill_rect(r, &dark_paint, Transform::identity(), None);
-    }
-    if let Some(r) = tiny_skia::Rect::from_xywh(cx, cy - len - gap, 1.0, len) {
-        target.fill_rect(r, &light_paint, Transform::identity(), None);
-    }
-    if let Some(r) = tiny_skia::Rect::from_xywh(cx, cy + gap, 1.0, len) {
-        target.fill_rect(r, &light_paint, Transform::identity(), None);
-    }
-
-    // Center dot
-    if let Some(r) = tiny_skia::Rect::from_xywh(cx - 1.0, cy - 1.0, 3.0, 3.0) {
-        target.fill_rect(r, &dark_paint, Transform::identity(), None);
-    }
-    if let Some(r) = tiny_skia::Rect::from_xywh(cx, cy, 1.0, 1.0) {
-        target.fill_rect(r, &light_paint, Transform::identity(), None);
-    }
-}
 
     fn render_dimming_mask(&self, target: &mut Pixmap, dim_alpha: u8) {
-        let dim_color = (0u8, 0u8, 0u8, dim_alpha);
+        let dim_color = (29u8, 32u8, 33u8, dim_alpha); // Gruvbox dark veil #1d2021
         let mut paint = Paint::default();
         paint.set_color_rgba8(dim_color.0, dim_color.1, dim_color.2, dim_color.3);
         paint.anti_alias = false;
@@ -178,8 +105,8 @@ fn render_crosshair(target: &mut Pixmap, cx: f32, cy: f32) {
         let w = self.width as f32;
         let h = self.height as f32;
 
-        if let Some(ref sel) = self.selection {
-            if !sel.is_empty() {
+        match self.selection.as_ref() {
+            Some(sel) if !sel.is_empty() => {
                 // Top region
                 if sel.y > 0.0 {
                     if let Some(r) = tiny_skia::Rect::from_xywh(0.0, 0.0, w, sel.y) {
@@ -207,18 +134,24 @@ fn render_crosshair(target: &mut Pixmap, cx: f32, cy: f32) {
                     }
                 }
             }
+            _ => {
+                // Dim entire screen when no selection
+                if let Some(r) = tiny_skia::Rect::from_xywh(0.0, 0.0, w, h) {
+                    target.fill_rect(r, &paint, Transform::identity(), None);
+                }
+            }
         }
     }
 
     fn render_selection_overlay(&self, target: &mut Pixmap, sel: &SelectionRect, config: &Config) {
-        // 1. Draw Selection Border (Gruvbox yellow / bright border)
+        // 1. Draw Selection Border (Gruvbox green #b8bb26)
         let border_color = crate::config::parse_hex_color(&config.theme.selection_border)
-            .unwrap_or((250, 189, 47, 255));
+            .unwrap_or((184, 187, 38, 255));
 
         if let Some(r) = tiny_skia::Rect::from_xywh(sel.x, sel.y, sel.w, sel.h) {
             let path = PathBuilder::from_rect(r);
             let mut paint = Paint::default();
-            paint.set_color_rgba8(border_color.0, border_color.1, border_color.2, 240);
+            paint.set_color_rgba8(border_color.0, border_color.1, border_color.2, 255);
             paint.anti_alias = true;
             let stroke = Stroke {
                 width: 2.0,
@@ -229,7 +162,7 @@ fn render_crosshair(target: &mut Pixmap, cx: f32, cy: f32) {
 
         // 2. Draw 8 Resize Handles
         let handle_color = crate::config::parse_hex_color(&config.theme.handle_color)
-            .unwrap_or((254, 128, 25, 255));
+            .unwrap_or((184, 187, 38, 255));
         let handle_radius = 5.0;
 
         let mut handle_paint = Paint::default();
@@ -247,40 +180,6 @@ fn render_crosshair(target: &mut Pixmap, cx: f32, cy: f32) {
                     target.stroke_path(&p, &outline_paint, &outline_stroke, Transform::identity(), None);
                 }
             }
-        }
-
-        // 3. Draw Size Tooltip Badge ({w} x {h})
-        let size_text = format!("{} × {}", sel.w.round() as i32, sel.h.round() as i32);
-        let badge_w = size_text.len() as f32 * 7.5 + 16.0;
-        let badge_h = 22.0;
-
-        let badge_x = sel.x;
-        let badge_y = if sel.y >= badge_h + 6.0 {
-            sel.y - badge_h - 4.0
-        } else {
-            sel.y + 6.0
-        };
-
-        if let Some(br) = tiny_skia::Rect::from_xywh(badge_x, badge_y, badge_w, badge_h) {
-            let bp = PathBuilder::from_rect(br);
-            let mut bg_paint = Paint::default();
-            bg_paint.set_color_rgba8(40, 40, 40, 230);
-            target.fill_path(&bp, &bg_paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
-
-            let mut sp = Paint::default();
-            sp.set_color_rgba8(250, 189, 47, 200);
-            let stroke = Stroke { width: 1.0, ..Default::default() };
-            target.stroke_path(&bp, &sp, &stroke, Transform::identity(), None);
-
-            render_text(
-                target,
-                &size_text,
-                badge_x + 8.0,
-                badge_y + 15.0,
-                11.0,
-                (235, 219, 178, 255),
-                None,
-            );
         }
     }
 

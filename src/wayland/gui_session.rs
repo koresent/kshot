@@ -471,7 +471,19 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                                     h: s.h,
                                     color,
                                     thickness: thick,
-                                    filled: state.shift_held,
+                                    filled: false,
+                                });
+                            }
+                            ToolType::RectFilled => {
+                                let s = SelectionRect::from_points(start_x, start_y, px, py);
+                                state.canvas.in_progress_annotation = Some(Annotation::Rectangle {
+                                    x: s.x,
+                                    y: s.y,
+                                    w: s.w,
+                                    h: s.h,
+                                    color,
+                                    thickness: thick,
+                                    filled: true,
                                 });
                             }
                             ToolType::Circle => {
@@ -563,17 +575,33 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                                 ButtonId::ActionRedo => {
                                     state.canvas.annotations.redo();
                                 }
+                                ButtonId::ActionPin => {
+                                    if let Some(cropped) = state.canvas.get_cropped_frame() {
+                                        if let Ok(bytes) = cropped.to_png_bytes() {
+                                            let tmp_path = format!("/tmp/kshot_pin_{}.png", std::process::id());
+                                            if std::fs::write(&tmp_path, &bytes).is_ok() {
+                                                let _ = std::process::Command::new("kshot")
+                                                    .args(["pin", &tmp_path])
+                                                    .spawn();
+                                                state.running.store(false, Ordering::SeqCst);
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
                                 ButtonId::ToolSelection => state.active_tool = ToolType::Selection,
+                                ButtonId::ToolPencil => state.active_tool = ToolType::Pencil,
+                                ButtonId::ToolLine => state.active_tool = ToolType::Line,
                                 ButtonId::ToolArrow => state.active_tool = ToolType::Arrow,
                                 ButtonId::ToolRectangle => state.active_tool = ToolType::Rectangle,
+                                ButtonId::ToolRectFilled => state.active_tool = ToolType::RectFilled,
                                 ButtonId::ToolCircle => state.active_tool = ToolType::Circle,
-                                ButtonId::ToolPencil => state.active_tool = ToolType::Pencil,
                                 ButtonId::ToolMarker => state.active_tool = ToolType::Marker,
                                 ButtonId::ToolText => state.active_tool = ToolType::Text,
                                 ButtonId::ToolCounter => state.active_tool = ToolType::Counter,
+                                ButtonId::ToolBlur => state.active_tool = ToolType::Blur,
                                 ButtonId::ToolPixelate => state.active_tool = ToolType::Pixelate,
                                 ButtonId::ToolInvert => state.active_tool = ToolType::Invert,
-                                _ => {}
                             }
                             state.toolbar.set_active_tool(btn_id);
                             state.queue_render(qh);

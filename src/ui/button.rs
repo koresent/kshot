@@ -1,15 +1,18 @@
-use tiny_skia::{LineCap, Paint, PathBuilder, Pixmap, Stroke, Transform};
+use tiny_skia::{LineCap, LineJoin, Paint, PathBuilder, Pixmap, Stroke, Transform};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ButtonId {
     ToolSelection,
+    ToolPencil,
+    ToolLine,
     ToolArrow,
     ToolRectangle,
+    ToolRectFilled,
     ToolCircle,
     ToolMarker,
-    ToolPencil,
     ToolText,
     ToolCounter,
+    ToolBlur,
     ToolPixelate,
     ToolInvert,
     ActionUndo,
@@ -24,15 +27,18 @@ pub enum ButtonId {
 impl ButtonId {
     pub fn tooltip(&self) -> &'static str {
         match self {
-            ButtonId::ToolSelection => "Selection (S)",
+            ButtonId::ToolSelection => "Move Selection (S)",
+            ButtonId::ToolPencil => "Pencil (P)",
+            ButtonId::ToolLine => "Line (L)",
             ButtonId::ToolArrow => "Arrow (A)",
             ButtonId::ToolRectangle => "Rectangle (R)",
+            ButtonId::ToolRectFilled => "Filled Rectangle",
             ButtonId::ToolCircle => "Circle (C)",
             ButtonId::ToolMarker => "Marker (M)",
-            ButtonId::ToolPencil => "Pencil (P)",
             ButtonId::ToolText => "Text (T)",
             ButtonId::ToolCounter => "Step Counter (N)",
-            ButtonId::ToolPixelate => "Pixelate/Blur (B)",
+            ButtonId::ToolBlur => "Blur (B)",
+            ButtonId::ToolPixelate => "Pixelate",
             ButtonId::ToolInvert => "Invert Colors (I)",
             ButtonId::ActionUndo => "Undo (Ctrl+Z)",
             ButtonId::ActionRedo => "Redo (Ctrl+Shift+Z)",
@@ -77,28 +83,27 @@ impl UiButton {
         let cy = self.center_y;
         let r = self.radius;
 
-        let circle_rect = tiny_skia::Rect::from_xywh(cx - r, cy - r, r * 2.0, r * 2.0);
-        let cr = match circle_rect {
+        let circle_rect = match tiny_skia::Rect::from_xywh(cx - r, cy - r, r * 2.0, r * 2.0) {
             Some(rect) => rect,
             None => return,
         };
 
-        let path = match PathBuilder::from_oval(cr) {
+        let path = match PathBuilder::from_oval(circle_rect) {
             Some(p) => p,
             None => return,
         };
 
-        // 1. Draw Button Circle Background
+        // 1. Draw Button Circle Background (Gruvbox Dark / snap-hud style)
         let mut bg_paint = Paint::default();
         if self.is_active {
-            // Active tool background
-            bg_paint.set_color_rgba8(accent_color.0, accent_color.1, accent_color.2, 230);
+            // Active: Gruvbox Green #b8bb26
+            bg_paint.set_color_rgba8(accent_color.0, accent_color.1, accent_color.2, 255);
         } else if self.is_hovered {
-            // Hovered background
-            bg_paint.set_color_rgba8(80, 73, 69, 230); // Gruvbox bg3
+            // Hover: Gruvbox bg1 #3c3836
+            bg_paint.set_color_rgba8(60, 56, 54, 245);
         } else {
-            // Normal background
-            bg_paint.set_color_rgba8(50, 48, 47, 210); // Gruvbox bg1
+            // Normal: Gruvbox bg0 #282828
+            bg_paint.set_color_rgba8(40, 40, 40, 240);
         }
         bg_paint.anti_alias = true;
         pixmap.fill_path(&path, &bg_paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
@@ -106,26 +111,26 @@ impl UiButton {
         // 2. Draw Circle Border
         let mut border_paint = Paint::default();
         if self.is_active {
-            border_paint.set_color_rgba8(250, 189, 47, 255); // Gruvbox yellow
+            border_paint.set_color_rgba8(accent_color.0, accent_color.1, accent_color.2, 255);
         } else if self.is_hovered {
-            border_paint.set_color_rgba8(235, 219, 178, 200);
+            border_paint.set_color_rgba8(102, 92, 84, 255); // Gruvbox dark3 #665c54
         } else {
-            border_paint.set_color_rgba8(102, 92, 84, 180);
+            border_paint.set_color_rgba8(80, 73, 69, 220); // Gruvbox dark2 #504945
         }
         border_paint.anti_alias = true;
         let border_stroke = Stroke {
-            width: if self.is_active { 2.0 } else { 1.5 },
+            width: if self.is_active { 1.5 } else { 1.0 },
             ..Default::default()
         };
         pixmap.stroke_path(&path, &border_paint, &border_stroke, Transform::identity(), None);
 
         // 3. Draw Icon Glyph
         let icon_color = if self.is_active {
-            (40, 40, 40, 255) // Dark icon on bright active background
+            (29, 32, 33, 255) // #1d2021 dark contrast on active green background
         } else if self.is_hovered {
-            (253, 244, 193, 255)
+            (251, 241, 199, 255) // #fbf1c7 light high contrast
         } else {
-            (235, 219, 178, 240)
+            (235, 219, 178, 245) // #ebdbb2 Gruvbox fg
         };
 
         let mut icon_paint = Paint::default();
@@ -145,16 +150,46 @@ fn render_button_icon(
     paint: &Paint,
 ) {
     let stroke_2 = Stroke {
-        width: 2.0,
+        width: 1.8,
         line_cap: LineCap::Round,
+        line_join: LineJoin::Round,
         ..Default::default()
     };
 
     match id {
         ButtonId::ToolSelection => {
-            // Dashed or border selection icon
-            if let Some(r) = tiny_skia::Rect::from_xywh(cx - size * 0.7, cy - size * 0.7, size * 1.4, size * 1.4) {
-                let p = PathBuilder::from_rect(r);
+            // 4-way compass arrow (move selection)
+            let mut pb = PathBuilder::new();
+            // Horizontal line & heads
+            pb.move_to(cx - size * 0.7, cy);
+            pb.line_to(cx + size * 0.7, cy);
+            pb.move_to(cx - size * 0.4, cy - size * 0.3);
+            pb.line_to(cx - size * 0.7, cy);
+            pb.line_to(cx - size * 0.4, cy + size * 0.3);
+            pb.move_to(cx + size * 0.4, cy - size * 0.3);
+            pb.line_to(cx + size * 0.7, cy);
+            pb.line_to(cx + size * 0.4, cy + size * 0.3);
+
+            // Vertical line & heads
+            pb.move_to(cx, cy - size * 0.7);
+            pb.line_to(cx, cy + size * 0.7);
+            pb.move_to(cx - size * 0.3, cy - size * 0.4);
+            pb.line_to(cx, cy - size * 0.7);
+            pb.line_to(cx + size * 0.3, cy - size * 0.4);
+            pb.move_to(cx - size * 0.3, cy + size * 0.4);
+            pb.line_to(cx, cy + size * 0.7);
+            pb.line_to(cx + size * 0.3, cy + size * 0.4);
+
+            if let Some(p) = pb.finish() {
+                pixmap.stroke_path(&p, paint, &stroke_2, Transform::identity(), None);
+            }
+        }
+        ButtonId::ToolLine => {
+            // Straight diagonal line
+            let mut pb = PathBuilder::new();
+            pb.move_to(cx - size * 0.6, cy + size * 0.6);
+            pb.line_to(cx + size * 0.6, cy - size * 0.6);
+            if let Some(p) = pb.finish() {
                 pixmap.stroke_path(&p, paint, &stroke_2, Transform::identity(), None);
             }
         }
@@ -171,12 +206,21 @@ fn render_button_icon(
             }
         }
         ButtonId::ToolRectangle => {
-            if let Some(r) = tiny_skia::Rect::from_xywh(cx - size * 0.7, cy - size * 0.5, size * 1.4, size) {
+            // Stroked rectangle
+            if let Some(r) = tiny_skia::Rect::from_xywh(cx - size * 0.65, cy - size * 0.55, size * 1.3, size * 1.1) {
                 let p = PathBuilder::from_rect(r);
                 pixmap.stroke_path(&p, paint, &stroke_2, Transform::identity(), None);
             }
         }
+        ButtonId::ToolRectFilled => {
+            // Filled rectangle
+            if let Some(r) = tiny_skia::Rect::from_xywh(cx - size * 0.65, cy - size * 0.55, size * 1.3, size * 1.1) {
+                let p = PathBuilder::from_rect(r);
+                pixmap.fill_path(&p, paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
+            }
+        }
         ButtonId::ToolCircle => {
+            // Stroked circle
             if let Some(r) = tiny_skia::Rect::from_xywh(cx - size * 0.65, cy - size * 0.65, size * 1.3, size * 1.3) {
                 if let Some(p) = PathBuilder::from_oval(r) {
                     pixmap.stroke_path(&p, paint, &stroke_2, Transform::identity(), None);
@@ -184,6 +228,7 @@ fn render_button_icon(
             }
         }
         ButtonId::ToolPencil => {
+            // Pencil
             let mut pb = PathBuilder::new();
             pb.move_to(cx - size * 0.6, cy + size * 0.6);
             pb.line_to(cx + size * 0.5, cy - size * 0.5);
@@ -195,6 +240,7 @@ fn render_button_icon(
             }
         }
         ButtonId::ToolMarker => {
+            // Marker
             let mut pb = PathBuilder::new();
             pb.move_to(cx - size * 0.7, cy + size * 0.7);
             pb.line_to(cx - size * 0.3, cy + size * 0.7);
@@ -206,10 +252,10 @@ fn render_button_icon(
             }
         }
         ButtonId::ToolText => {
-            let mut pb = PathBuilder::new();
             // Capital T
-            pb.move_to(cx - size * 0.7, cy - size * 0.6);
-            pb.line_to(cx + size * 0.7, cy - size * 0.6);
+            let mut pb = PathBuilder::new();
+            pb.move_to(cx - size * 0.65, cy - size * 0.6);
+            pb.line_to(cx + size * 0.65, cy - size * 0.6);
             pb.move_to(cx, cy - size * 0.6);
             pb.line_to(cx, cy + size * 0.7);
             if let Some(p) = pb.finish() {
@@ -231,19 +277,34 @@ fn render_button_icon(
                 pixmap.stroke_path(&p, paint, &stroke_2, Transform::identity(), None);
             }
         }
+        ButtonId::ToolBlur => {
+            // Water droplet (blur)
+            let mut pb = PathBuilder::new();
+            pb.move_to(cx, cy - size * 0.75);
+            pb.quad_to(cx + size * 0.65, cy + size * 0.1, cx, cy + size * 0.75);
+            pb.quad_to(cx - size * 0.65, cy + size * 0.1, cx, cy - size * 0.75);
+            pb.close();
+            if let Some(p) = pb.finish() {
+                pixmap.fill_path(&p, paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
+            }
+        }
         ButtonId::ToolPixelate => {
-            // 2x2 grid
-            let s = size * 0.55;
-            let gap = 1.0;
-            for (gx, gy) in [(-s, -s), (gap, -s), (-s, gap), (gap, gap)] {
-                if let Some(r) = tiny_skia::Rect::from_xywh(cx + gx, cy + gy, s - gap, s - gap) {
-                    let p = PathBuilder::from_rect(r);
-                    pixmap.fill_path(&p, paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
+            // 3x3 small grid
+            let s = size * 0.35;
+            let step = size * 0.45;
+            for row in -1..=1 {
+                for col in -1..=1 {
+                    let rx = cx + col as f32 * step - s * 0.5;
+                    let ry = cy + row as f32 * step - s * 0.5;
+                    if let Some(r) = tiny_skia::Rect::from_xywh(rx, ry, s, s) {
+                        let p = PathBuilder::from_rect(r);
+                        pixmap.fill_path(&p, paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
+                    }
                 }
             }
         }
         ButtonId::ToolInvert => {
-            // Yin-yang / half circle
+            // Half-circle / Yin-yang
             if let Some(r) = tiny_skia::Rect::from_xywh(cx - size * 0.7, cy - size * 0.7, size * 1.4, size * 1.4) {
                 if let Some(p) = PathBuilder::from_oval(r) {
                     pixmap.stroke_path(&p, paint, &stroke_2, Transform::identity(), None);
@@ -286,21 +347,24 @@ fn render_button_icon(
             }
             if let Some(r2) = tiny_skia::Rect::from_xywh(cx - size * 0.6, cy - size * 0.2, size * 0.8, size * 0.9) {
                 let p = PathBuilder::from_rect(r2);
-                pixmap.fill_path(&p, paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
+                pixmap.stroke_path(&p, paint, &stroke_2, Transform::identity(), None);
             }
         }
         ButtonId::ActionSave => {
-            // Tray with down-arrow
+            // Floppy disk
             let mut pb = PathBuilder::new();
-            pb.move_to(cx - size * 0.7, cy + size * 0.2);
-            pb.line_to(cx - size * 0.7, cy + size * 0.6);
-            pb.line_to(cx + size * 0.7, cy + size * 0.6);
-            pb.line_to(cx + size * 0.7, cy + size * 0.2);
-            pb.move_to(cx, cy - size * 0.6);
-            pb.line_to(cx, cy + size * 0.2);
-            pb.move_to(cx - size * 0.35, cy - size * 0.15);
-            pb.line_to(cx, cy + size * 0.2);
-            pb.line_to(cx + size * 0.35, cy - size * 0.15);
+            pb.move_to(cx - size * 0.65, cy - size * 0.65);
+            pb.line_to(cx + size * 0.4, cy - size * 0.65);
+            pb.line_to(cx + size * 0.65, cy - size * 0.4);
+            pb.line_to(cx + size * 0.65, cy + size * 0.65);
+            pb.line_to(cx - size * 0.65, cy + size * 0.65);
+            pb.close();
+            // Shutter
+            pb.move_to(cx - size * 0.35, cy - size * 0.65);
+            pb.line_to(cx + size * 0.2, cy - size * 0.65);
+            pb.line_to(cx + size * 0.2, cy - size * 0.15);
+            pb.line_to(cx - size * 0.35, cy - size * 0.15);
+            pb.close();
             if let Some(p) = pb.finish() {
                 pixmap.stroke_path(&p, paint, &stroke_2, Transform::identity(), None);
             }

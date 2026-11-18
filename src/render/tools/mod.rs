@@ -23,6 +23,7 @@ pub enum ToolType {
     Line,
     Arrow,
     Rectangle,
+    RectFilled,
     Circle,
     Marker,
     Text,
