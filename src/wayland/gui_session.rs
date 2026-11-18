@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tiny_skia::Pixmap;
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm,
+    wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm,
     wl_shm_pool, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum};
@@ -58,6 +58,8 @@ pub struct GuiSession {
     pub current_buf_idx: usize,
     pub render_buffer: Option<Pixmap>,
     pub last_click: Option<(std::time::Instant, f32, f32)>,
+    pub needs_render: bool,
+    pub frame_callback_pending: bool,
     pub running: Arc<AtomicBool>,
 }
 
@@ -130,7 +132,16 @@ impl GuiSession {
             current_buf_idx: 0,
             render_buffer: Pixmap::new(w, h),
             last_click: None,
+            needs_render: false,
+            frame_callback_pending: false,
             running,
+        }
+    }
+
+    pub fn queue_render(&mut self, qh: &QueueHandle<Self>) {
+        self.needs_render = true;
+        if !self.frame_callback_pending {
+            self.render_frame(qh);
         }
     }
 
@@ -138,6 +149,9 @@ impl GuiSession {
         if !self.configured || self.width == 0 || self.height == 0 {
             return;
         }
+
+        self.needs_render = false;
+        self.frame_callback_pending = true;
 
         let shm = match self.shm.as_ref() {
             Some(s) => s,
@@ -196,10 +210,11 @@ impl GuiSession {
             d[3] = s[3]; // Alpha
         }
 
-        // Attach & commit to Wayland surface
+        // Attach, damage, frame callback & commit to Wayland surface
         if let Some(surf) = &self.surface {
             surf.attach(Some(&buf.buffer), 0, 0);
             surf.damage_buffer(0, 0, self.width as i32, self.height as i32);
+            surf.frame(qh, ());
             surf.commit();
         }
 
@@ -359,11 +374,11 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                 let py = surface_y as f32;
                 state.canvas.cursor_pos = Some((px as i32, py as i32));
                 state.toolbar.handle_mouse_move(px, py);
-                state.render_frame(qh);
+                state.queue_render(qh);
             }
             wl_pointer::Event::Leave { .. } => {
                 state.canvas.cursor_pos = None;
-                state.render_frame(qh);
+                state.queue_render(qh);
             }
             wl_pointer::Event::Motion { surface_x, surface_y, .. } => {
                 let px = surface_x as f32;
@@ -514,7 +529,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                     }
                 }
 
-                state.render_frame(qh);
+                state.queue_render(qh);
             }
 
             wl_pointer::Event::Button { button, state: btn_state, .. } => {
@@ -560,7 +575,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                                 _ => {}
                             }
                             state.toolbar.set_active_tool(btn_id);
-                            state.render_frame(qh);
+                            state.queue_render(qh);
                             return;
                         }
 
@@ -595,7 +610,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                                 state.height as f32,
                             );
                             state.last_click = None;
-                            state.render_frame(qh);
+                            state.queue_render(qh);
                             return;
                         }
                         state.last_click = Some((now, px, py));
@@ -662,7 +677,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                             return;
                         }
                     }
-                    state.render_frame(qh);
+                    state.queue_render(qh);
                 } else if button == 0x111 && pressed {
                     // Right mouse button: decrement counter, reset selection, or exit immediately
                     if state.active_tool == ToolType::Counter && state.counter_value > 1 {
@@ -675,7 +690,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                         state.running.store(false, Ordering::SeqCst);
                         return;
                     }
-                    state.render_frame(qh);
+                    state.queue_render(qh);
                 }
             }
 
@@ -686,7 +701,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                 } else if value > 0.0 {
                     state.toolbar.thickness = (state.toolbar.thickness - 1.0).max(1.0);
                 }
-                state.render_frame(qh);
+                state.queue_render(qh);
             }
 
             _ => {}
@@ -852,7 +867,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for GuiSession {
                     _ => {}
                 }
 
-                state.render_frame(qh);
+                state.queue_render(qh);
             }
             _ => {}
         }
@@ -895,6 +910,24 @@ impl Dispatch<wl_output::WlOutput, ()> for GuiSession {
                 if out == output {
                     *out_name = Some(name.clone());
                 }
+            }
+        }
+    }
+}
+
+impl Dispatch<wl_callback::WlCallback, ()> for GuiSession {
+    fn event(
+        state: &mut Self,
+        _: &wl_callback::WlCallback,
+        event: wl_callback::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        if let wl_callback::Event::Done { .. } = event {
+            state.frame_callback_pending = false;
+            if state.needs_render {
+                state.render_frame(qh);
             }
         }
     }

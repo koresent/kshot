@@ -1,5 +1,5 @@
 use crate::render::selection::SelectionRect;
-use crate::render::tools::render_text;
+use crate::render::tools::{render_text, render_text_centered};
 use crate::ui::button::{ButtonId, UiButton};
 use tiny_skia::{Paint, PathBuilder, Pixmap, Stroke, Transform};
 
@@ -199,12 +199,14 @@ impl ToolbarManager {
                 let stroke = Stroke { width: 1.5, ..Default::default() };
                 pixmap.stroke_path(&path, &bp, &stroke, Transform::identity(), None);
 
-                render_text(
+                let cx = bx + banner_w * 0.5;
+                let cy = by + banner_h * 0.5;
+                render_text_centered(
                     pixmap,
                     "Select area • Double-click full screen • Esc / Right-click to exit",
-                    bx + 20.0,
-                    by + 23.0,
-                    12.5,
+                    cx,
+                    cy,
+                    12.0,
                     (235, 219, 178, 255),
                     None,
                 );
