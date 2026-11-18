@@ -2,11 +2,12 @@ use crate::capture::CaptureFrame;
 use crate::cli::GuiArgs;
 use crate::config::Config;
 use crate::export::{copy_png_to_clipboard, save_image_to_file, send_clipboard_notification};
+use crate::render::canvas::ActiveTextInput;
 use crate::render::selection::{Handle, SelectionRect};
 use crate::render::tools::{Annotation, ArrowStyle, ToolType};
 use crate::render::Canvas;
 use crate::ui::button::ButtonId;
-use crate::ui::ToolbarManager;
+use crate::ui::{ColorWheel, ToolbarManager};
 use crate::wayland::shm::{create_shm_buffer, ShmBuffer};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -16,6 +17,7 @@ use wayland_client::protocol::{
     wl_shm_pool, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum};
+use wayland_protocols::wp::cursor_shape::v1::client::{wp_cursor_shape_device_v1, wp_cursor_shape_manager_v1};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -30,6 +32,7 @@ pub enum DragMode {
 pub struct GuiSession {
     pub canvas: Canvas,
     pub toolbar: ToolbarManager,
+    pub color_wheel: ColorWheel,
     pub config: Config,
     pub gui_args: GuiArgs,
     pub active_tool: ToolType,
@@ -45,6 +48,11 @@ pub struct GuiSession {
     pub seat: Option<wl_seat::WlSeat>,
     pub pointer: Option<wl_pointer::WlPointer>,
     pub keyboard: Option<wl_keyboard::WlKeyboard>,
+    pub cursor_shape_manager: Option<wp_cursor_shape_manager_v1::WpCursorShapeManagerV1>,
+    pub cursor_shape_device: Option<wp_cursor_shape_device_v1::WpCursorShapeDeviceV1>,
+    pub last_enter_serial: u32,
+    pub xkb_state: Option<xkbcommon::xkb::State>,
+
     pub outputs: Vec<(wl_output::WlOutput, Option<String>)>,
     pub target_output_name: Option<String>,
 
@@ -105,6 +113,7 @@ impl GuiSession {
         Self {
             canvas,
             toolbar,
+            color_wheel: ColorWheel::new(),
             config,
             gui_args,
             active_tool: initial_tool,
@@ -119,6 +128,10 @@ impl GuiSession {
             seat: None,
             pointer: None,
             keyboard: None,
+            cursor_shape_manager: None,
+            cursor_shape_device: None,
+            last_enter_serial: 0,
+            xkb_state: None,
             outputs: Vec::new(),
             target_output_name,
 
@@ -136,6 +149,44 @@ impl GuiSession {
             frame_callback_pending: false,
             running,
         }
+    }
+
+    pub fn set_cursor_shape(&mut self, shape: wp_cursor_shape_device_v1::Shape) {
+        if let Some(ref device) = self.cursor_shape_device {
+            device.set_shape(self.last_enter_serial, shape);
+        }
+    }
+
+    pub fn update_cursor(&mut self) {
+        let (px, py) = match self.canvas.cursor_pos {
+            Some((x, y)) => (x as f32, y as f32),
+            None => return,
+        };
+
+        let shape = if self.color_wheel.visible || self.toolbar.hovered_button.is_some() {
+            wp_cursor_shape_device_v1::Shape::Pointer
+        } else if let Some(ref sel) = self.canvas.selection {
+            if let Some(handle) = sel.hit_handle(px, py, 10.0) {
+                match handle {
+                    Handle::TopLeft | Handle::BottomRight => wp_cursor_shape_device_v1::Shape::NwseResize,
+                    Handle::TopRight | Handle::BottomLeft => wp_cursor_shape_device_v1::Shape::NeswResize,
+                    Handle::TopCenter | Handle::BottomCenter => wp_cursor_shape_device_v1::Shape::NsResize,
+                    Handle::MiddleLeft | Handle::MiddleRight => wp_cursor_shape_device_v1::Shape::EwResize,
+                }
+            } else if sel.contains(px, py) && self.active_tool == ToolType::Selection {
+                wp_cursor_shape_device_v1::Shape::Move
+            } else if self.active_tool == ToolType::Text {
+                wp_cursor_shape_device_v1::Shape::Text
+            } else {
+                wp_cursor_shape_device_v1::Shape::Crosshair
+            }
+        } else if self.active_tool == ToolType::Text {
+            wp_cursor_shape_device_v1::Shape::Text
+        } else {
+            wp_cursor_shape_device_v1::Shape::Crosshair
+        };
+
+        self.set_cursor_shape(shape);
     }
 
     pub fn queue_render(&mut self, qh: &QueueHandle<Self>) {
@@ -198,7 +249,7 @@ impl GuiSession {
         };
 
         // Render everything from canvas onto the internal RGBA render buffer
-        self.canvas.render_to(render_buf, &self.toolbar, &self.config);
+        self.canvas.render_to(render_buf, &self.toolbar, &self.color_wheel, &self.config);
 
         // Convert RGBA (tiny-skia) to ARGB8888 (Wayland wl_shm little-endian: [B, G, R, A])
         let src = render_buf.data();
@@ -208,56 +259,68 @@ impl GuiSession {
         let dst_u32 = unsafe { std::slice::from_raw_parts_mut(dst.as_mut_ptr() as *mut u32, num_pixels) };
         for (s, d) in src_u32.iter().zip(dst_u32.iter_mut()) {
             let px = *s;
-            *d = (px & 0xFF00FF00) | ((px & 0x00FF0000) >> 16) | ((px & 0x000000FF) << 16);
-        }
-
-        // Attach, damage, frame callback & commit to Wayland surface
-        if let Some(surf) = &self.surface {
-            surf.attach(Some(&buf.buffer), 0, 0);
-            surf.damage_buffer(0, 0, self.width as i32, self.height as i32);
-            surf.frame(qh, ());
-            surf.commit();
+            let r = (px & 0xFF) as u32;
+            let g = ((px >> 8) & 0xFF) as u32;
+            let b = ((px >> 16) & 0xFF) as u32;
+            let a = ((px >> 24) & 0xFF) as u32;
+            *d = (a << 24) | (r << 16) | (g << 8) | b;
         }
 
         self.current_buf_idx = back_idx;
+
+        if let Some(ref surface) = self.surface {
+            surface.attach(Some(&buf.buffer), 0, 0);
+            surface.damage_buffer(0, 0, self.width as i32, self.height as i32);
+
+            let frame_cb = surface.frame(qh, ());
+            let _ = frame_cb;
+
+            surface.commit();
+        }
     }
 
-    pub fn finish_and_export(&mut self, copy: bool, save: bool) {
-        let frame = match self.canvas.get_cropped_frame() {
-            Some(f) => f,
-            None => {
-                // If no selection, export full frame
-                self.canvas.base_frame.clone()
-            }
-        };
-
-        let png_bytes = match frame.to_png_bytes() {
-            Ok(b) => b,
-            Err(e) => {
-                eprintln!("Error encoding PNG: {e}");
-                self.running.store(false, Ordering::SeqCst);
-                return;
-            }
-        };
-
-        if self.gui_args.raw {
-            use std::io::Write;
-            let _ = std::io::stdout().write_all(&png_bytes);
-            self.running.store(false, Ordering::SeqCst);
-            return;
-        }
-
-        if copy || self.gui_args.clipboard {
-            if let Err(e) = copy_png_to_clipboard(&png_bytes) {
-                eprintln!("Clipboard error: {e}");
-            } else if self.config.general.show_notifications {
-                send_clipboard_notification();
+    pub fn commit_active_text(&mut self) {
+        if let Some(input) = self.canvas.active_text_input.take() {
+            if !input.text.trim().is_empty() {
+                self.canvas.annotations.push(Annotation::Text {
+                    x: input.x,
+                    y: input.y,
+                    text: input.text,
+                    color: input.color,
+                    font_size: input.font_size,
+                });
             }
         }
+    }
 
-        if save || self.gui_args.path.is_some() {
-            if let Err(e) = save_image_to_file(&png_bytes, self.gui_args.path.as_deref(), &self.config) {
-                eprintln!("Save error: {e}");
+    pub fn finish_and_export(&mut self, copy_clip: bool, save_file: bool) {
+        self.commit_active_text();
+
+        // If no region selected, full frame is exported
+        let frame = self.canvas.get_cropped_frame().unwrap_or_else(|| {
+            let mut full_rendered = self.canvas.base_frame.pixmap.clone();
+            for item in self.canvas.annotations.items() {
+                item.render(&mut full_rendered, None);
+            }
+            CaptureFrame::new(self.canvas.width, self.canvas.height, full_rendered)
+        });
+
+        if copy_clip {
+            if let Ok(bytes) = frame.to_png_bytes() {
+                if let Err(e) = copy_png_to_clipboard(&bytes) {
+                    eprintln!("Clipboard copy failed: {e}");
+                } else if self.config.general.show_notifications {
+                    send_clipboard_notification();
+                }
+            }
+        }
+
+        if save_file {
+            let custom_path = self.gui_args.path.as_deref().map(std::path::Path::new);
+            if let Ok(bytes) = frame.to_png_bytes() {
+                if let Err(e) = save_image_to_file(&bytes, custom_path, &self.config) {
+                    eprintln!("Save failed: {e}");
+                }
             }
         }
 
@@ -265,28 +328,18 @@ impl GuiSession {
     }
 }
 
-pub fn parse_region_geometry(geom: &str) -> Option<SelectionRect> {
-    // Format: WxH+X+Y
-    let parts: Vec<&str> = geom.split('+').collect();
-    if parts.len() != 3 {
-        return None;
+fn parse_region_geometry(reg: &str) -> Option<SelectionRect> {
+    let parts: Vec<&str> = reg.split(|c| c == ',' || c == 'x' || c == '+').collect();
+    if parts.len() == 4 {
+        let x: f32 = parts[0].parse().ok()?;
+        let y: f32 = parts[1].parse().ok()?;
+        let w: f32 = parts[2].parse().ok()?;
+        let h: f32 = parts[3].parse().ok()?;
+        Some(SelectionRect::new(x, y, w, h))
+    } else {
+        None
     }
-    let wh: Vec<&str> = parts[0].split('x').collect();
-    if wh.len() != 2 {
-        return None;
-    }
-
-    let w: f32 = wh[0].parse().ok()?;
-    let h: f32 = wh[1].parse().ok()?;
-    let x: f32 = parts[1].parse().ok()?;
-    let y: f32 = parts[2].parse().ok()?;
-
-    Some(SelectionRect::new(x, y, w, h))
 }
-
-// -----------------------------------------------------------------------------
-// Wayland Protocol Dispatch Implementations
-// -----------------------------------------------------------------------------
 
 impl Dispatch<wl_registry::WlRegistry, ()> for GuiSession {
     fn event(
@@ -320,6 +373,18 @@ impl Dispatch<wl_registry::WlRegistry, ()> for GuiSession {
                 }
                 "wl_seat" => {
                     state.seat = Some(registry.bind::<wl_seat::WlSeat, _, _>(name, version.min(5), qh, ()));
+                }
+                "wp_cursor_shape_manager_v1" => {
+                    let mgr = registry.bind::<wp_cursor_shape_manager_v1::WpCursorShapeManagerV1, _, _>(
+                        name,
+                        1,
+                        qh,
+                        (),
+                    );
+                    if let Some(ref ptr) = state.pointer {
+                        state.cursor_shape_device = Some(mgr.get_pointer(ptr, qh, ()));
+                    }
+                    state.cursor_shape_manager = Some(mgr);
                 }
                 "wl_output" => {
                     let out = registry.bind::<wl_output::WlOutput, _, _>(name, version.min(4), qh, ());
@@ -370,11 +435,13 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
         qh: &QueueHandle<Self>,
     ) {
         match event {
-            wl_pointer::Event::Enter { surface_x, surface_y, .. } => {
+            wl_pointer::Event::Enter { serial, surface_x, surface_y, .. } => {
+                state.last_enter_serial = serial;
                 let px = surface_x as f32;
                 let py = surface_y as f32;
                 state.canvas.cursor_pos = Some((px as i32, py as i32));
                 state.toolbar.handle_mouse_move(px, py);
+                state.update_cursor();
                 state.queue_render(qh);
             }
             wl_pointer::Event::Leave { .. } => {
@@ -385,6 +452,13 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                 let px = surface_x as f32;
                 let py = surface_y as f32;
                 state.canvas.cursor_pos = Some((px as i32, py as i32));
+
+                if state.color_wheel.visible {
+                    state.color_wheel.handle_mouse_move(px, py);
+                    state.update_cursor();
+                    state.queue_render(qh);
+                    return;
+                }
 
                 // Handle drag interactions
                 match state.drag_mode {
@@ -425,14 +499,28 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
 
                         match state.active_tool {
                             ToolType::Arrow => {
-                                let style = if state.config.tools.arrow_style == "classic" {
-                                    ArrowStyle::Classic
-                                } else {
-                                    ArrowStyle::Curved
+                                let mut end_x = px;
+                                let mut end_y = py;
+                                if state.shift_held {
+                                    let dx = px - start_x;
+                                    let dy = py - start_y;
+                                    if dx.abs() > dy.abs() * 2.0 {
+                                        end_y = start_y;
+                                    } else if dy.abs() > dx.abs() * 2.0 {
+                                        end_x = start_x;
+                                    } else {
+                                        let dist = (dx.abs() + dy.abs()) * 0.5;
+                                        end_x = start_x + dist * dx.signum();
+                                        end_y = start_y + dist * dy.signum();
+                                    }
+                                }
+                                let style = match state.config.tools.arrow_style.as_str() {
+                                    "curved" => ArrowStyle::Curved,
+                                    _ => ArrowStyle::Classic,
                                 };
                                 state.canvas.in_progress_annotation = Some(Annotation::Arrow {
                                     start: (start_x, start_y),
-                                    end: (px, py),
+                                    end: (end_x, end_y),
                                     color,
                                     thickness: thick,
                                     style,
@@ -442,7 +530,6 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                                 let mut end_x = px;
                                 let mut end_y = py;
                                 if state.shift_held {
-                                    // Snap to 0, 45, 90 degrees
                                     let dx = px - start_x;
                                     let dy = py - start_y;
                                     if dx.abs() > dy.abs() * 2.0 {
@@ -542,6 +629,13 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                     }
                 }
 
+                // Update magnifier visibility (Flameshot logic: active in selection mode, hidden when drawing)
+                let is_selection_tool = state.active_tool == ToolType::Selection;
+                let is_creating_sel = matches!(state.drag_mode, DragMode::CreatingSelection { .. });
+                let no_hover = state.toolbar.hovered_button.is_none() && !state.color_wheel.visible;
+                state.canvas.show_magnifier = (state.canvas.selection.is_none() || is_creating_sel || is_selection_tool) && no_hover;
+
+                state.update_cursor();
                 state.queue_render(qh);
             }
 
@@ -554,7 +648,27 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                 if button == 0x110 {
                     // Left mouse button
                     if pressed {
-                        // 1. Check Toolbar click
+                        // 1. Color Wheel Interaction (Flameshot circular palette)
+                        if state.color_wheel.visible {
+                            if let Some(chosen) = state.color_wheel.handle_click(px, py) {
+                                state.toolbar.set_active_color(chosen);
+                            }
+                            state.color_wheel.hide();
+                            state.update_cursor();
+                            state.queue_render(qh);
+                            return;
+                        }
+
+                        // 2. Active Text Input Commit on Click
+                        if state.canvas.active_text_input.is_some() {
+                            state.commit_active_text();
+                            if state.active_tool != ToolType::Text {
+                                state.queue_render(qh);
+                                return;
+                            }
+                        }
+
+                        // 3. Check Toolbar click
                         if let Some(btn_id) = state.toolbar.handle_click(px, py) {
                             match btn_id {
                                 ButtonId::ActionConfirm | ButtonId::ActionCopy => {
@@ -604,19 +718,21 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                                 ButtonId::ToolInvert => state.active_tool = ToolType::Invert,
                             }
                             state.toolbar.set_active_tool(btn_id);
+                            state.update_cursor();
                             state.queue_render(qh);
                             return;
                         }
 
-                        // 2. Check Selection handle hit
+                        // 4. Check Selection handle hit
                         if let Some(ref sel) = state.canvas.selection {
                             if let Some(h) = sel.hit_handle(px, py, 10.0) {
                                 state.drag_mode = DragMode::ResizingSelection { handle: h };
+                                state.update_cursor();
                                 return;
                             }
                         }
 
-                        // 3. Check Double Click for Full Screen
+                        // 5. Check Double Click for Full Screen
                         let now = std::time::Instant::now();
                         let is_double_click = if let Some((prev_time, prev_x, prev_y)) = state.last_click {
                             now.duration_since(prev_time).as_millis() < 350
@@ -639,12 +755,13 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                                 state.height as f32,
                             );
                             state.last_click = None;
+                            state.update_cursor();
                             state.queue_render(qh);
                             return;
                         }
                         state.last_click = Some((now, px, py));
 
-                        // 4. Check Inside Selection or Create New Selection
+                        // 6. Check Inside Selection or Create New Selection / Tools
                         let inside_sel = state.canvas.selection.as_ref().map(|s| s.contains(px, py)).unwrap_or(false);
 
                         if state.active_tool == ToolType::Selection {
@@ -659,38 +776,46 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                             } else {
                                 state.drag_mode = DragMode::CreatingSelection { start_x: px, start_y: py };
                             }
+                        } else if state.active_tool == ToolType::Text {
+                            // Text tool: start interactive text entry at clicked coordinates
+                            let color = state.toolbar.active_color();
+                            let font_size = 16.0 + state.toolbar.thickness * 2.0;
+                            state.canvas.active_text_input = Some(ActiveTextInput {
+                                x: px,
+                                y: py,
+                                text: String::new(),
+                                color,
+                                font_size,
+                                cursor_visible: true,
+                            });
+                        } else if state.active_tool == ToolType::Counter {
+                            let color = state.toolbar.active_color();
+                            state.canvas.annotations.push(Annotation::Counter {
+                                number: state.counter_value,
+                                center: (px, py),
+                                pointer: None,
+                                color,
+                                radius: 14.0,
+                            });
+                            state.counter_value += 1;
+                        } else if state.active_tool == ToolType::Pencil {
+                            let color = state.toolbar.active_color();
+                            state.canvas.in_progress_annotation = Some(Annotation::Pencil {
+                                points: vec![(px, py)],
+                                color,
+                                thickness: state.toolbar.thickness,
+                            });
+                            state.drag_mode = DragMode::DrawingTool { start_x: px, start_y: py };
+                        } else if state.active_tool == ToolType::Marker {
+                            let color = state.toolbar.active_color();
+                            state.canvas.in_progress_annotation = Some(Annotation::Marker {
+                                points: vec![(px, py)],
+                                color,
+                                thickness: state.toolbar.thickness,
+                            });
+                            state.drag_mode = DragMode::DrawingTool { start_x: px, start_y: py };
                         } else {
-                            // Active drawing tool
-                            if state.active_tool == ToolType::Counter {
-                                // Place counter badge immediately
-                                let color = state.toolbar.active_color();
-                                state.canvas.annotations.push(Annotation::Counter {
-                                    number: state.counter_value,
-                                    center: (px, py),
-                                    pointer: None,
-                                    color,
-                                    radius: 14.0,
-                                });
-                                state.counter_value += 1;
-                            } else if state.active_tool == ToolType::Pencil {
-                                let color = state.toolbar.active_color();
-                                state.canvas.in_progress_annotation = Some(Annotation::Pencil {
-                                    points: vec![(px, py)],
-                                    color,
-                                    thickness: state.toolbar.thickness,
-                                });
-                                state.drag_mode = DragMode::DrawingTool { start_x: px, start_y: py };
-                            } else if state.active_tool == ToolType::Marker {
-                                let color = state.toolbar.active_color();
-                                state.canvas.in_progress_annotation = Some(Annotation::Marker {
-                                    points: vec![(px, py)],
-                                    color,
-                                    thickness: state.toolbar.thickness,
-                                });
-                                state.drag_mode = DragMode::DrawingTool { start_x: px, start_y: py };
-                            } else {
-                                state.drag_mode = DragMode::DrawingTool { start_x: px, start_y: py };
-                            }
+                            state.drag_mode = DragMode::DrawingTool { start_x: px, start_y: py };
                         }
                     } else {
                         // Left button released
@@ -706,30 +831,30 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                             return;
                         }
                     }
+                    state.update_cursor();
                     state.queue_render(qh);
                 } else if button == 0x111 && pressed {
-                    // Right mouse button: decrement counter, reset selection, or exit immediately
-                    if state.active_tool == ToolType::Counter && state.counter_value > 1 {
-                        state.counter_value -= 1;
-                    } else if state.canvas.selection.is_some() {
-                        state.canvas.selection = None;
-                        state.active_tool = ToolType::Selection;
-                        state.toolbar.set_active_tool(ButtonId::ToolSelection);
+                    // Right mouse button (Flameshot right-click circular palette)
+                    if state.color_wheel.visible {
+                        state.color_wheel.hide();
+                    } else if state.canvas.active_text_input.is_some() {
+                        state.canvas.active_text_input = None;
                     } else {
-                        state.running.store(false, Ordering::SeqCst);
-                        return;
+                        state.color_wheel.show_at(px, py, state.width as f32, state.height as f32);
                     }
+                    state.update_cursor();
                     state.queue_render(qh);
                 }
             }
 
             wl_pointer::Event::Axis { value, .. } => {
-                // Mouse wheel: scroll up increases thickness, scroll down decreases
-                if value < 0.0 {
-                    state.toolbar.thickness = (state.toolbar.thickness + 1.0).min(40.0);
-                } else if value > 0.0 {
-                    state.toolbar.thickness = (state.toolbar.thickness - 1.0).max(1.0);
-                }
+                // Mouse wheel: scroll up increases thickness, scroll down decreases (Flameshot toolSize)
+                let delta = if value < 0.0 { 1.0 } else { -1.0 };
+                state.toolbar.thickness = (state.toolbar.thickness + delta).clamp(1.0, 50.0);
+                state.canvas.size_notification = Some((
+                    format!("{} px", state.toolbar.thickness as u32),
+                    std::time::Instant::now(),
+                ));
                 state.queue_render(qh);
             }
 
@@ -748,6 +873,34 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for GuiSession {
         qh: &QueueHandle<Self>,
     ) {
         match event {
+            wl_keyboard::Event::Keymap { format, fd, size } => {
+                if format == WEnum::Value(wl_keyboard::KeymapFormat::XkbV1) {
+                    let ctx = xkbcommon::xkb::Context::new(xkbcommon::xkb::CONTEXT_NO_FLAGS);
+                    let keymap = unsafe {
+                        xkbcommon::xkb::Keymap::new_from_fd(
+                            &ctx,
+                            fd,
+                            size as usize,
+                            xkbcommon::xkb::KEYMAP_FORMAT_TEXT_V1,
+                            xkbcommon::xkb::KEYMAP_COMPILE_NO_FLAGS,
+                        )
+                    };
+                    if let Ok(Some(k)) = keymap {
+                        state.xkb_state = Some(xkbcommon::xkb::State::new(&k));
+                    }
+                }
+            }
+            wl_keyboard::Event::Modifiers {
+                mods_depressed,
+                mods_latched,
+                mods_locked,
+                group,
+                ..
+            } => {
+                if let Some(ref mut xkb) = state.xkb_state {
+                    xkb.update_mask(mods_depressed, mods_latched, mods_locked, 0, 0, group);
+                }
+            }
             wl_keyboard::Event::Key { key, state: key_state, .. } => {
                 let pressed = key_state == WEnum::Value(wl_keyboard::KeyState::Pressed);
 
@@ -763,10 +916,53 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for GuiSession {
                     return;
                 }
 
+                // If active text input is open, route typing to it
+                if state.canvas.active_text_input.is_some() {
+                    let keycode = xkbcommon::xkb::Keycode::new(key + 8);
+                    let keysym_val = state
+                        .xkb_state
+                        .as_ref()
+                        .map(|s| s.key_get_one_sym(keycode).raw())
+                        .unwrap_or(0);
+
+                    if keysym_val == xkbcommon::xkb::keysyms::KEY_Escape || key == 1 || key == 9 {
+                        state.canvas.active_text_input = None;
+                        state.queue_render(qh);
+                        return;
+                    }
+
+                    if keysym_val == xkbcommon::xkb::keysyms::KEY_Return || key == 28 || key == 36 {
+                        state.commit_active_text();
+                        state.queue_render(qh);
+                        return;
+                    }
+
+                    if keysym_val == xkbcommon::xkb::keysyms::KEY_BackSpace || key == 14 || key == 22 {
+                        if let Some(ref mut input) = state.canvas.active_text_input {
+                            input.text.pop();
+                        }
+                        state.queue_render(qh);
+                        return;
+                    }
+
+                    if let Some(ref xkb) = state.xkb_state {
+                        let text_chunk = xkb.key_get_utf8(keycode);
+                        if !text_chunk.is_empty() && text_chunk.chars().all(|c| !c.is_control()) {
+                            if let Some(ref mut input) = state.canvas.active_text_input {
+                                input.text.push_str(&text_chunk);
+                            }
+                            state.queue_render(qh);
+                            return;
+                        }
+                    }
+                }
+
                 match key {
                     1 | 9 => {
-                        // Escape: clear selection or exit
-                        if state.canvas.selection.is_some() {
+                        // Escape: close color wheel, clear selection, or exit
+                        if state.color_wheel.visible {
+                            state.color_wheel.hide();
+                        } else if state.canvas.selection.is_some() {
                             state.canvas.selection = None;
                         } else {
                             state.running.store(false, Ordering::SeqCst);
@@ -840,31 +1036,19 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for GuiSession {
                         state.active_tool = ToolType::Circle;
                         state.toolbar.set_active_tool(ButtonId::ToolCircle);
                     }
-                    25 => {
+                    25 if !state.ctrl_held => {
                         state.active_tool = ToolType::Pencil;
                         state.toolbar.set_active_tool(ButtonId::ToolPencil);
                     }
-                    50 => {
+                    50 if !state.ctrl_held => {
                         state.active_tool = ToolType::Marker;
                         state.toolbar.set_active_tool(ButtonId::ToolMarker);
                     }
-                    20 => {
+                    20 if !state.ctrl_held => {
                         state.active_tool = ToolType::Text;
                         state.toolbar.set_active_tool(ButtonId::ToolText);
                     }
-                    49 => {
-                        state.active_tool = ToolType::Counter;
-                        state.toolbar.set_active_tool(ButtonId::ToolCounter);
-                    }
-                    48 => {
-                        state.active_tool = ToolType::Pixelate;
-                        state.toolbar.set_active_tool(ButtonId::ToolPixelate);
-                    }
-                    23 => {
-                        state.active_tool = ToolType::Invert;
-                        state.toolbar.set_active_tool(ButtonId::ToolInvert);
-                    }
-                    // Arrow nudging
+                    // Arrow Keys: Nudge selection
                     103 => {
                         // Up
                         if let Some(ref mut sel) = state.canvas.selection {
@@ -896,6 +1080,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for GuiSession {
                     _ => {}
                 }
 
+                state.update_cursor();
                 state.queue_render(qh);
             }
             _ => {}
@@ -915,7 +1100,11 @@ impl Dispatch<wl_seat::WlSeat, ()> for GuiSession {
         if let wl_seat::Event::Capabilities { capabilities } = event {
             if let WEnum::Value(caps) = capabilities {
                 if caps.contains(wl_seat::Capability::Pointer) {
-                    state.pointer = Some(seat.get_pointer(qh, ()));
+                    let ptr = seat.get_pointer(qh, ());
+                    if let Some(ref mgr) = state.cursor_shape_manager {
+                        state.cursor_shape_device = Some(mgr.get_pointer(&ptr, qh, ()));
+                    }
+                    state.pointer = Some(ptr);
                 }
                 if caps.contains(wl_seat::Capability::Keyboard) {
                     state.keyboard = Some(seat.get_keyboard(qh, ()));
@@ -968,3 +1157,5 @@ wayland_client::delegate_noop!(GuiSession: ignore wl_shm::WlShm);
 wayland_client::delegate_noop!(GuiSession: ignore wl_shm_pool::WlShmPool);
 wayland_client::delegate_noop!(GuiSession: ignore wl_buffer::WlBuffer);
 wayland_client::delegate_noop!(GuiSession: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
+wayland_client::delegate_noop!(GuiSession: ignore wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_manager_v1::WpCursorShapeManagerV1);
+wayland_client::delegate_noop!(GuiSession: ignore wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::WpCursorShapeDeviceV1);

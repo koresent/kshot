@@ -11,6 +11,7 @@ pub struct ToolbarManager {
     pub selected_swatch: usize,
     pub active_tool: ButtonId,
     pub thickness: f32,
+    pub custom_color: Option<(u8, u8, u8, u8)>,
     pub hovered_button: Option<ButtonId>,
     pub size_badge_pos: Option<(f32, f32)>,
 }
@@ -78,6 +79,7 @@ impl ToolbarManager {
             selected_swatch: 0,
             active_tool: ButtonId::ToolSelection,
             thickness: initial_thickness,
+            custom_color: None,
             hovered_button: None,
             size_badge_pos: None,
         };
@@ -100,10 +102,20 @@ impl ToolbarManager {
     }
 
     pub fn active_color(&self) -> (u8, u8, u8, u8) {
+        if let Some(c) = self.custom_color {
+            return c;
+        }
         if let Some(&(r, g, b)) = self.swatches.get(self.selected_swatch) {
             (r, g, b, 255)
         } else {
             (184, 187, 38, 255) // Default Gruvbox green #b8bb26
+        }
+    }
+
+    pub fn set_active_color(&mut self, color: (u8, u8, u8, u8)) {
+        self.custom_color = Some(color);
+        if let Some(pos) = self.swatches.iter().position(|&(r, g, b)| (r, g, b) == (color.0, color.1, color.2)) {
+            self.selected_swatch = pos;
         }
     }
 

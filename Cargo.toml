@@ -9,7 +9,9 @@ description = "Native Wayland screenshot and annotation tool matching Gruvbox Da
 [dependencies]
 # Wayland client & protocols
 wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+xkbcommon = "0.8"
 
 # 2D Graphics, Typography & Image Processing
 tiny-skia = "0.12"

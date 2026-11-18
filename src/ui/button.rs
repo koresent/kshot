@@ -14,6 +14,7 @@ pub enum ButtonId {
     ToolCounter,
     ToolBlur,
     ToolPixelate,
+    #[allow(dead_code)]
     ToolInvert,
     ActionUndo,
     ActionRedo,

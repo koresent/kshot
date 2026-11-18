@@ -490,6 +490,29 @@ pub fn render_text_centered(
     render_text(pixmap, text, start_x, start_y, font_size, color, font_data);
 }
 
+pub fn measure_text_width(text: &str, font_size: f32, font_data: Option<&[u8]>) -> f32 {
+    let font_owned;
+    let font: &fontdue::Font = if let Some(bytes) = font_data {
+        font_owned = match fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()) {
+            Ok(f) => Some(f),
+            Err(_) => return text.len() as f32 * font_size * 0.6,
+        };
+        font_owned.as_ref().unwrap()
+    } else {
+        &DEFAULT_FONT
+    };
+
+    let mut w = 0.0f32;
+    for ch in text.chars() {
+        if ch == '\n' {
+            break;
+        }
+        let (metrics, _) = font.rasterize(ch, font_size);
+        w += metrics.advance_width;
+    }
+    w
+}
+
 #[derive(Default, Clone)]
 pub struct AnnotationStack {
     undo_stack: Vec<Annotation>,

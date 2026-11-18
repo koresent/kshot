@@ -1,9 +1,20 @@
 use crate::capture::CaptureFrame;
 use crate::config::Config;
+use crate::render::magnifier::{render_circular_magnifier, MagnifierConfig};
 use crate::render::selection::SelectionRect;
-use crate::render::tools::{Annotation, AnnotationStack};
-use crate::ui::ToolbarManager;
+use crate::render::tools::{measure_text_width, render_text, Annotation, AnnotationStack};
+use crate::ui::{ColorWheel, ToolbarManager};
 use tiny_skia::{Paint, PathBuilder, Pixmap, Stroke, Transform};
+
+#[derive(Debug, Clone)]
+pub struct ActiveTextInput {
+    pub x: f32,
+    pub y: f32,
+    pub text: String,
+    pub color: (u8, u8, u8, u8),
+    pub font_size: f32,
+    pub cursor_visible: bool,
+}
 
 pub struct Canvas {
     pub base_frame: CaptureFrame,
@@ -12,7 +23,10 @@ pub struct Canvas {
     pub selection: Option<SelectionRect>,
     pub annotations: AnnotationStack,
     pub in_progress_annotation: Option<Annotation>,
+    pub active_text_input: Option<ActiveTextInput>,
     pub cursor_pos: Option<(i32, i32)>,
+    pub show_magnifier: bool,
+    pub size_notification: Option<(String, std::time::Instant)>,
 }
 
 impl Canvas {
@@ -26,7 +40,10 @@ impl Canvas {
             selection: None,
             annotations: AnnotationStack::new(),
             in_progress_annotation: None,
+            active_text_input: None,
             cursor_pos: None,
+            show_magnifier: true,
+            size_notification: None,
         }
     }
 
@@ -35,6 +52,7 @@ impl Canvas {
         &self,
         target: &mut Pixmap,
         toolbar: &ToolbarManager,
+        color_wheel: &ColorWheel,
         config: &Config,
     ) {
         let target_w = target.width();
@@ -76,28 +94,148 @@ impl Canvas {
             item.render(target, None);
         }
 
-        // 4. Apply Dimming Mask outside the selection box
+        // 4. Render active text input if editing
+        if let Some(ref input) = self.active_text_input {
+            self.render_active_text(target, input);
+        }
+
+        // 5. Apply Dimming Mask outside the selection box (Flameshot exact rgba(0, 0, 0, 190))
         let dim_alpha = config.general.dim_opacity;
         if dim_alpha > 0 {
             self.render_dimming_mask(target, dim_alpha);
         }
 
-        // 5. Render Selection Box Border and 8 Handles
+        // 6. Render Selection Box Border and 8 Handles
         if let Some(ref sel) = self.selection {
             if !sel.is_empty() {
                 self.render_selection_overlay(target, sel, config);
             }
         }
 
-        // 6. Render Floating Toolbars
+        // 7. Render Floating Toolbars
         let accent = crate::config::parse_hex_color(&config.theme.accent)
             .map(|(r, g, b, _)| (r, g, b))
             .unwrap_or((184, 187, 38));
         toolbar.render(target, self.selection.as_ref(), accent);
+
+        // 8. Render Circular Color Wheel (if open)
+        if color_wheel.visible {
+            color_wheel.render(target, toolbar.active_color());
+        }
+
+        // 9. Render Circular Magnifier Loupe
+        if self.show_magnifier && !color_wheel.visible {
+            if let Some((cx, cy)) = self.cursor_pos {
+                let mag_cfg = MagnifierConfig {
+                    zoom: config.general.magnifier_zoom,
+                    grid_size: config.general.magnifier_size,
+                };
+                render_circular_magnifier(
+                    target,
+                    &self.base_frame.pixmap,
+                    cx,
+                    cy,
+                    accent,
+                    &mag_cfg,
+                );
+            }
+        }
+
+        // 10. Render Tool Size Notification (Flameshot size notification)
+        if let Some((ref text, timestamp)) = self.size_notification {
+            if timestamp.elapsed().as_millis() < 1200 {
+                self.render_size_badge(target, text, accent);
+            }
+        }
+    }
+
+    fn render_active_text(&self, target: &mut Pixmap, input: &ActiveTextInput) {
+        let text_w = measure_text_width(&input.text, input.font_size, None);
+        let box_w = (text_w + 24.0).max(64.0);
+        let box_h = input.font_size * 1.35;
+        let box_x = input.x - 4.0;
+        let box_y = input.y - 4.0;
+
+        // Background box
+        if let Some(r) = tiny_skia::Rect::from_xywh(box_x, box_y, box_w, box_h) {
+            let mut bg_paint = Paint::default();
+            bg_paint.set_color_rgba8(40, 40, 40, 210); // Gruvbox dark
+            target.fill_rect(r, &bg_paint, Transform::identity(), None);
+
+            let path = PathBuilder::from_rect(r);
+            let mut border_paint = Paint::default();
+            border_paint.set_color_rgba8(input.color.0, input.color.1, input.color.2, 220);
+            let stroke = Stroke { width: 1.5, ..Default::default() };
+            target.stroke_path(&path, &border_paint, &stroke, Transform::identity(), None);
+        }
+
+        // Text content
+        if !input.text.is_empty() {
+            render_text(
+                target,
+                &input.text,
+                input.x + 2.0,
+                input.y + 2.0,
+                input.font_size,
+                input.color,
+                None,
+            );
+        }
+
+        // Blinking cursor |
+        if input.cursor_visible {
+            let cursor_x = input.x + text_w + 3.0;
+            let cursor_y = input.y;
+            if let Some(cr) = tiny_skia::Rect::from_xywh(cursor_x, cursor_y, 2.0, input.font_size) {
+                let mut cp = Paint::default();
+                cp.set_color_rgba8(input.color.0, input.color.1, input.color.2, 255);
+                target.fill_rect(cr, &cp, Transform::identity(), None);
+            }
+        }
+    }
+
+    fn render_size_badge(&self, target: &mut Pixmap, text: &str, accent: (u8, u8, u8)) {
+        let w = 84.0;
+        let h = 32.0;
+        let (bx, by) = if let Some((cx, cy)) = self.cursor_pos {
+            let mut x = cx as f32 + 20.0;
+            let mut y = cy as f32 - 40.0;
+            if x + w > target.width() as f32 - 10.0 {
+                x = cx as f32 - w - 20.0;
+            }
+            if y < 10.0 {
+                y = cy as f32 + 20.0;
+            }
+            (x, y)
+        } else {
+            (24.0, 24.0)
+        };
+
+        if let Some(r) = tiny_skia::Rect::from_xywh(bx, by, w, h) {
+            let path = PathBuilder::from_rect(r);
+            let mut bg = Paint::default();
+            bg.set_color_rgba8(40, 40, 40, 240);
+            target.fill_rect(r, &bg, Transform::identity(), None);
+
+            let mut border = Paint::default();
+            border.set_color_rgba8(accent.0, accent.1, accent.2, 255);
+            let s = Stroke { width: 1.5, ..Default::default() };
+            target.stroke_path(&path, &border, &s, Transform::identity(), None);
+
+            crate::render::tools::render_text_centered(
+                target,
+                text,
+                bx + w / 2.0,
+                by + h / 2.0,
+                14.0,
+                (235, 219, 178, 255),
+                None,
+            );
+        }
     }
 
     fn render_dimming_mask(&self, target: &mut Pixmap, dim_alpha: u8) {
-        let dim_color = (29u8, 32u8, 33u8, dim_alpha); // Gruvbox dark veil #1d2021
+        let dim_color = (0u8, 0u8, 0u8, dim_alpha); // Flameshot exact pure black overlay rgba(0, 0, 0, opacity)
         let mut paint = Paint::default();
         paint.set_color_rgba8(dim_color.0, dim_color.1, dim_color.2, dim_color.3);
         paint.anti_alias = false;
@@ -196,6 +334,20 @@ impl Canvas {
             item.render(&mut full_rendered, None);
         }
 
+        if let Some(ref input) = self.active_text_input {
+            if !input.text.is_empty() {
+                render_text(
+                    &mut full_rendered,
+                    &input.text,
+                    input.x + 2.0,
+                    input.y + 2.0,
+                    input.font_size,
+                    input.color,
+                    None,
+                );
+            }
+        }
+
         let full_frame = CaptureFrame::new(self.width, self.height, full_rendered);
         full_frame
             .crop(
@@ -205,5 +357,35 @@ impl Canvas {
                 sel.h.round() as u32,
             )
             .ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_active_text_input_rendering_and_cropping() {
+        let mut base = Pixmap::new(200, 200).unwrap();
+        base.fill(tiny_skia::Color::from_rgba8(30, 30, 30, 255));
+        let frame = CaptureFrame::new(200, 200, base);
+        let config = Config::default();
+        let mut canvas = Canvas::new(frame, &config);
+
+        canvas.selection = Some(SelectionRect::new(20.0, 20.0, 100.0, 100.0));
+        canvas.active_text_input = Some(ActiveTextInput {
+            x: 30.0,
+            y: 30.0,
+            text: "Hello Wayland".to_string(),
+            color: (184, 187, 38, 255),
+            font_size: 16.0,
+            cursor_visible: true,
+        });
+
+        let cropped = canvas.get_cropped_frame();
+        assert!(cropped.is_some());
+        let frame = cropped.unwrap();
+        assert_eq!(frame.width, 100);
+        assert_eq!(frame.height, 100);
     }
 }

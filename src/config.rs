@@ -61,7 +61,7 @@ fn default_false() -> bool {
     false
 }
 fn default_dim_opacity() -> u8 {
-    115
+    190
 }
 fn default_magnifier_zoom() -> u32 {
     8
@@ -326,7 +326,7 @@ mod tests {
         assert!(yaml.contains("swatches:"));
 
         let deserialized: Config = serde_yaml::from_str(&yaml).expect("Deserialization failed");
-        assert_eq!(deserialized.general.dim_opacity, 115);
+        assert_eq!(deserialized.general.dim_opacity, 190);
         assert_eq!(deserialized.theme.accent, "#b8bb26");
     }
 
