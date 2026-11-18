@@ -328,6 +328,17 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
         qh: &QueueHandle<Self>,
     ) {
         match event {
+            wl_pointer::Event::Enter { surface_x, surface_y, .. } => {
+                let px = surface_x as f32;
+                let py = surface_y as f32;
+                state.canvas.cursor_pos = Some((px as i32, py as i32));
+                state.toolbar.handle_mouse_move(px, py);
+                state.render_frame(qh);
+            }
+            wl_pointer::Event::Leave { .. } => {
+                state.canvas.cursor_pos = None;
+                state.render_frame(qh);
+            }
             wl_pointer::Event::Motion { surface_x, surface_y, .. } => {
                 let px = surface_x as f32;
                 let py = surface_y as f32;
@@ -804,10 +815,21 @@ impl Dispatch<wl_seat::WlSeat, ()> for GuiSession {
     }
 }
 
-wayland_client::delegate_noop!(GuiSession: wl_compositor::WlCompositor);
-wayland_client::delegate_noop!(GuiSession: wl_surface::WlSurface);
-wayland_client::delegate_noop!(GuiSession: wl_shm::WlShm);
-wayland_client::delegate_noop!(GuiSession: wl_shm_pool::WlShmPool);
-wayland_client::delegate_noop!(GuiSession: wl_buffer::WlBuffer);
-wayland_client::delegate_noop!(GuiSession: wl_output::WlOutput);
-wayland_client::delegate_noop!(GuiSession: zwlr_layer_shell_v1::ZwlrLayerShellV1);
+impl Dispatch<wl_output::WlOutput, ()> for GuiSession {
+    fn event(
+        _state: &mut Self,
+        _output: &wl_output::WlOutput,
+        _event: wl_output::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+wayland_client::delegate_noop!(GuiSession: ignore wl_compositor::WlCompositor);
+wayland_client::delegate_noop!(GuiSession: ignore wl_surface::WlSurface);
+wayland_client::delegate_noop!(GuiSession: ignore wl_shm::WlShm);
+wayland_client::delegate_noop!(GuiSession: ignore wl_shm_pool::WlShmPool);
+wayland_client::delegate_noop!(GuiSession: ignore wl_buffer::WlBuffer);
+wayland_client::delegate_noop!(GuiSession: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);

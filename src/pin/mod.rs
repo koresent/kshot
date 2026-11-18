@@ -338,9 +338,9 @@ impl Dispatch<wl_seat::WlSeat, ()> for PinSession {
     }
 }
 
-wayland_client::delegate_noop!(PinSession: wl_compositor::WlCompositor);
-wayland_client::delegate_noop!(PinSession: wl_surface::WlSurface);
-wayland_client::delegate_noop!(PinSession: wl_shm::WlShm);
-wayland_client::delegate_noop!(PinSession: wl_shm_pool::WlShmPool);
-wayland_client::delegate_noop!(PinSession: wl_buffer::WlBuffer);
-wayland_client::delegate_noop!(PinSession: zwlr_layer_shell_v1::ZwlrLayerShellV1);
+wayland_client::delegate_noop!(PinSession: ignore wl_compositor::WlCompositor);
+wayland_client::delegate_noop!(PinSession: ignore wl_surface::WlSurface);
+wayland_client::delegate_noop!(PinSession: ignore wl_shm::WlShm);
+wayland_client::delegate_noop!(PinSession: ignore wl_shm_pool::WlShmPool);
+wayland_client::delegate_noop!(PinSession: ignore wl_buffer::WlBuffer);
+wayland_client::delegate_noop!(PinSession: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
