@@ -56,6 +56,7 @@ pub struct GuiSession {
     pub height: u32,
     pub shm_buffers: Option<[ShmBuffer; 2]>,
     pub current_buf_idx: usize,
+    pub render_buffer: Option<Pixmap>,
     pub running: Arc<AtomicBool>,
 }
 
@@ -126,6 +127,7 @@ impl GuiSession {
             height: h,
             shm_buffers: None,
             current_buf_idx: 0,
+            render_buffer: Pixmap::new(w, h),
             running,
         }
     }
@@ -168,12 +170,29 @@ impl GuiSession {
             None => return,
         };
 
-        // Render everything from canvas onto the Wayland buffer
-        let mut temp_pixmap = Pixmap::new(self.width, self.height).unwrap();
-        self.canvas.render_to(&mut temp_pixmap, &self.toolbar, &self.config);
+        // Ensure render buffer exists and matches dimensions
+        if self.render_buffer.is_none()
+            || self.render_buffer.as_ref().map(|p| (p.width(), p.height())) != Some((self.width, self.height))
+        {
+            self.render_buffer = Pixmap::new(self.width, self.height);
+        }
+        let render_buf = match self.render_buffer.as_mut() {
+            Some(rb) => rb,
+            None => return,
+        };
 
-        // Copy rendered pixels into shm target
-        target_pixmap.data_mut().copy_from_slice(temp_pixmap.data());
+        // Render everything from canvas onto the internal RGBA render buffer
+        self.canvas.render_to(render_buf, &self.toolbar, &self.config);
+
+        // Convert RGBA (tiny-skia) to ARGB8888 (Wayland wl_shm little-endian: [B, G, R, A])
+        let src = render_buf.data();
+        let dst = target_pixmap.data_mut();
+        for (s, d) in src.chunks_exact(4).zip(dst.chunks_exact_mut(4)) {
+            d[0] = s[2]; // Blue
+            d[1] = s[1]; // Green
+            d[2] = s[0]; // Red
+            d[3] = s[3]; // Alpha
+        }
 
         // Attach & commit to Wayland surface
         if let Some(surf) = &self.surface {
@@ -311,6 +330,7 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for GuiSession {
                     state.width = width;
                     state.height = height;
                     state.shm_buffers = None;
+                    state.render_buffer = None;
                 }
                 state.render_frame(qh);
             }
@@ -614,12 +634,16 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                     }
                     state.render_frame(qh);
                 } else if button == 0x111 && pressed {
-                    // Right mouse button: decrement counter or reset selection
+                    // Right mouse button: decrement counter, reset selection, or exit immediately
                     if state.active_tool == ToolType::Counter && state.counter_value > 1 {
                         state.counter_value -= 1;
-                    } else {
+                    } else if state.canvas.selection.is_some() {
+                        state.canvas.selection = None;
                         state.active_tool = ToolType::Selection;
                         state.toolbar.set_active_tool(ButtonId::ToolSelection);
+                    } else {
+                        state.running.store(false, Ordering::SeqCst);
+                        return;
                     }
                     state.render_frame(qh);
                 }
@@ -687,8 +711,12 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for GuiSession {
                         return;
                     }
                     46 if state.ctrl_held => {
-                        // Ctrl+C: copy & exit
-                        state.finish_and_export(true, false);
+                        // Ctrl+C: copy & exit if selection, otherwise cancel & exit
+                        if state.canvas.selection.is_some() {
+                            state.finish_and_export(true, false);
+                        } else {
+                            state.running.store(false, Ordering::SeqCst);
+                        }
                         return;
                     }
                     31 if state.ctrl_held => {

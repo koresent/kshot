@@ -106,7 +106,61 @@ impl Canvas {
                 }
             }
         }
+
+        // 8. Render Precision Crosshair Cursor
+        if let Some((cx, cy)) = self.cursor_pos {
+            Self::render_crosshair(target, cx as f32, cy as f32);
+        }
     }
+
+fn render_crosshair(target: &mut Pixmap, cx: f32, cy: f32) {
+    let mut dark_paint = Paint::default();
+    dark_paint.set_color_rgba8(20, 20, 20, 220);
+    dark_paint.anti_alias = false;
+
+    let mut light_paint = Paint::default();
+    light_paint.set_color_rgba8(235, 219, 178, 255);
+    light_paint.anti_alias = false;
+
+    let len = 12.0;
+    let gap = 3.0;
+
+    // Horizontal
+    if let Some(r) = tiny_skia::Rect::from_xywh(cx - len - gap, cy - 1.0, len, 3.0) {
+        target.fill_rect(r, &dark_paint, Transform::identity(), None);
+    }
+    if let Some(r) = tiny_skia::Rect::from_xywh(cx + gap, cy - 1.0, len, 3.0) {
+        target.fill_rect(r, &dark_paint, Transform::identity(), None);
+    }
+    if let Some(r) = tiny_skia::Rect::from_xywh(cx - len - gap, cy, len, 1.0) {
+        target.fill_rect(r, &light_paint, Transform::identity(), None);
+    }
+    if let Some(r) = tiny_skia::Rect::from_xywh(cx + gap, cy, len, 1.0) {
+        target.fill_rect(r, &light_paint, Transform::identity(), None);
+    }
+
+    // Vertical
+    if let Some(r) = tiny_skia::Rect::from_xywh(cx - 1.0, cy - len - gap, 3.0, len) {
+        target.fill_rect(r, &dark_paint, Transform::identity(), None);
+    }
+    if let Some(r) = tiny_skia::Rect::from_xywh(cx - 1.0, cy + gap, 3.0, len) {
+        target.fill_rect(r, &dark_paint, Transform::identity(), None);
+    }
+    if let Some(r) = tiny_skia::Rect::from_xywh(cx, cy - len - gap, 1.0, len) {
+        target.fill_rect(r, &light_paint, Transform::identity(), None);
+    }
+    if let Some(r) = tiny_skia::Rect::from_xywh(cx, cy + gap, 1.0, len) {
+        target.fill_rect(r, &light_paint, Transform::identity(), None);
+    }
+
+    // Center dot
+    if let Some(r) = tiny_skia::Rect::from_xywh(cx - 1.0, cy - 1.0, 3.0, 3.0) {
+        target.fill_rect(r, &dark_paint, Transform::identity(), None);
+    }
+    if let Some(r) = tiny_skia::Rect::from_xywh(cx, cy, 1.0, 1.0) {
+        target.fill_rect(r, &light_paint, Transform::identity(), None);
+    }
+}
 
     fn render_dimming_mask(&self, target: &mut Pixmap, dim_alpha: u8) {
         let dim_color = (0u8, 0u8, 0u8, dim_alpha);
