@@ -60,7 +60,7 @@ impl Canvas {
         let target_data = target.data_mut();
         let src_data = self.base_frame.pixmap.data();
 
-        // 1. Copy base frozen frame
+        // Copy base frozen frame
         if target_w == self.base_frame.width && target_h == self.base_frame.height {
             let total = (target_w * target_h * 4) as usize;
             if total <= target_data.len() && total <= src_data.len() {
@@ -84,46 +84,38 @@ impl Canvas {
             }
         }
 
-        // 2. Render committed annotations onto canvas
         for item in self.annotations.items() {
             item.render(target, None);
         }
 
-        // 3. Render active in-progress annotation if drawing
         if let Some(ref item) = self.in_progress_annotation {
             item.render(target, None);
         }
 
-        // 4. Render active text input if editing
         if let Some(ref input) = self.active_text_input {
             self.render_active_text(target, input);
         }
 
-        // 5. Apply Dimming Mask outside the selection box (Flameshot exact rgba(0, 0, 0, 190))
         let dim_alpha = config.general.dim_opacity;
         if dim_alpha > 0 {
             self.render_dimming_mask(target, dim_alpha);
         }
 
-        // 6. Render Selection Box Border and 8 Handles
         if let Some(ref sel) = self.selection {
             if !sel.is_empty() {
                 self.render_selection_overlay(target, sel, config);
             }
         }
 
-        // 7. Render Floating Toolbars
         let accent = crate::config::parse_hex_color(&config.theme.accent)
             .map(|(r, g, b, _)| (r, g, b))
             .unwrap_or((184, 187, 38));
         toolbar.render(target, self.selection.as_ref(), accent);
 
-        // 8. Render Circular Color Wheel (if open)
         if color_wheel.visible {
             color_wheel.render(target, toolbar.active_color());
         }
 
-        // 9. Render Circular Magnifier Loupe
         if self.show_magnifier && !color_wheel.visible {
             if let Some((cx, cy)) = self.cursor_pos {
                 let mag_cfg = MagnifierConfig {
@@ -141,7 +133,6 @@ impl Canvas {
             }
         }
 
-        // 10. Render Tool Size Notification (Flameshot size notification)
         if let Some((ref text, timestamp)) = self.size_notification {
             if timestamp.elapsed().as_millis() < 1200 {
                 self.render_size_badge(target, text, accent);
@@ -265,7 +256,6 @@ impl Canvas {
     }
 
     fn render_selection_overlay(&self, target: &mut Pixmap, sel: &SelectionRect, config: &Config) {
-        // 1. Draw Selection Border (Gruvbox green #b8bb26)
         let border_color = crate::config::parse_hex_color(&config.theme.selection_border)
             .unwrap_or((184, 187, 38, 255));
 
@@ -281,7 +271,6 @@ impl Canvas {
             target.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
         }
 
-        // 2. Draw 8 Resize Handles
         let handle_color = crate::config::parse_hex_color(&config.theme.handle_color)
             .unwrap_or((184, 187, 38, 255));
         let handle_radius = 5.0;

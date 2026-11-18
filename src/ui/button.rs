@@ -94,29 +94,24 @@ impl UiButton {
             None => return,
         };
 
-        // 1. Draw Button Circle Background (Gruvbox Dark / snap-hud style)
         let mut bg_paint = Paint::default();
         if self.is_active {
-            // Active: Gruvbox Green #b8bb26
             bg_paint.set_color_rgba8(accent_color.0, accent_color.1, accent_color.2, 255);
         } else if self.is_hovered {
-            // Hover: Gruvbox bg1 #3c3836
             bg_paint.set_color_rgba8(60, 56, 54, 245);
         } else {
-            // Normal: Gruvbox bg0 #282828
             bg_paint.set_color_rgba8(40, 40, 40, 240);
         }
         bg_paint.anti_alias = true;
         pixmap.fill_path(&path, &bg_paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
 
-        // 2. Draw Circle Border
         let mut border_paint = Paint::default();
         if self.is_active {
             border_paint.set_color_rgba8(accent_color.0, accent_color.1, accent_color.2, 255);
         } else if self.is_hovered {
-            border_paint.set_color_rgba8(102, 92, 84, 255); // Gruvbox dark3 #665c54
+            border_paint.set_color_rgba8(102, 92, 84, 255);
         } else {
-            border_paint.set_color_rgba8(80, 73, 69, 220); // Gruvbox dark2 #504945
+            border_paint.set_color_rgba8(80, 73, 69, 220);
         }
         border_paint.anti_alias = true;
         let border_stroke = Stroke {
@@ -125,7 +120,6 @@ impl UiButton {
         };
         pixmap.stroke_path(&path, &border_paint, &border_stroke, Transform::identity(), None);
 
-        // 3. Draw Icon Glyph
         let icon_color = if self.is_active {
             (29, 32, 33, 255) // #1d2021 dark contrast on active green background
         } else if self.is_hovered {

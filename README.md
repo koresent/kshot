@@ -9,7 +9,7 @@ High-performance, native Wayland screenshot, cropping, and annotation utility wr
 ## Features
 
 - **Native Wayland Capture:** Frame capture via Wayland screencopy protocols (`wlr-screencopy-unstable-v1`, `ext-image-copy-capture-v1`) with fallback to `grim`.
-- **Zero Startup Latency:** Eliminates the 1–2s `xdg-desktop-portal` delay; instantly freezes screen state on invocation.
+- **Zero Startup Latency:** Eliminates the 1-2s `xdg-desktop-portal` delay; instantly freezes screen state on invocation.
 - **Fractional Scaling Precision:** Per-output buffer scaling (`wl_surface.set_buffer_scale`) guarantees pixel-perfect rendering across mixed DPI monitors.
 - **Full Flameshot Annotation Suite:**
   - **Selection:** Crop box with 8 magnetic resize handles, drag-to-move, and full-screen toggle.
@@ -17,12 +17,13 @@ High-performance, native Wayland screenshot, cropping, and annotation utility wr
   - **Rectangle & Circle:** Stroked or filled shapes (hold `Shift` while dragging to fill).
   - **Line:** Straight vector line with `Shift` angle snapping (0°, 45°, 90°).
   - **Pencil:** Smooth freehand curves with antialiased strokes.
-  - **Marker:** Translucent highlighter with `Multiply` blend mode to preserve text contrast.
+  - **Marker:** Translucent highlighter with high-contrast visibility on both dark and light themes.
+  - **Text:** Direct transparent text annotation with live cursor typing.
   - **Step Counter:** Auto-incrementing numbered badge bubbles (`1, 2, 3...`) with optional pointer line; right-click decrements.
   - **Pixelate & Blur:** Mosaic downsampling and Gaussian blur for redacting passwords, tokens, and personal data.
   - **Invert:** Color channel inversion within the selected region.
-  - **Magnifier Loupe:** Real-time zoomed pixel grid tracking the cursor with center crosshair, exact RGB hex/dec telemetry, and coordinates.
-  - **Undo / Redo:** Full immutable history stack (`Ctrl+Z`, `Ctrl+Shift+Z` / `Ctrl+Y`).
+  - **Magnifier Loupe:** Circular 10x pixel lens matching Flameshot geometry with center crosshair.
+  - **Undo / Redo:** Full immutable history stack (`Ctrl+Z`, `Ctrl+Y` / `Ctrl+Shift+Z`).
 - **Floating Pinned Windows (`kshot pin`):** Pin any cropped region as a borderless, stays-on-top floating window with drag repositioning and mouse-wheel zoom.
 - **Declarative YAML Configuration:** Fully configurable via `~/.config/kshot/config.yaml`.
 - **Gruvbox Dark Palette:** Native system theme integration with customizable palette swatches.
@@ -76,7 +77,7 @@ kshot screen -o DP-1 -c
 kshot area -g "1920x1080+0+0" -p ~/Pictures/capture.png
 
 # Pin an existing image as a floating overlay
-kshot pin -f ~/Pictures/reference.png
+kshot pin ~/Pictures/reference.png
 
 # Print path to configuration file
 kshot config --path
@@ -91,23 +92,25 @@ kshot config --path
 | `S` | Selection tool |
 | `A` | Arrow tool |
 | `R` | Rectangle tool |
+| `F` | Filled rectangle tool |
 | `C` | Circle / Ellipse tool |
 | `P` | Pencil (freehand) |
 | `M` | Marker (highlighter) |
 | `T` | Text tool |
 | `N` | Step counter (numbered bubble) |
-| `B` | Pixelate / blur redaction |
+| `B` | Pixelate redaction |
+| `U` | Blur redaction |
 | `I` | Invert colors |
 | `Ctrl + C` | Copy crop to clipboard and exit |
 | `Ctrl + S` | Save crop to file and exit |
 | `Enter` | Confirm and copy to clipboard |
 | `Space` | Pin crop to screen |
 | `Ctrl + Z` | Undo last annotation |
-| `Ctrl + Shift + Z` / `Ctrl + Y` | Redo annotation |
+| `Ctrl + Y` / `Ctrl + Shift + Z` | Redo annotation |
 | `Ctrl + A` | Select entire screen |
 | `Arrow Keys` | Nudge selection by 1px (hold `Shift` for 10px) |
 | `Mouse Wheel` | Adjust tool thickness / zoom |
-| `Right Click` | Decrement counter / reset active tool |
+| `Right Click` | Decrement counter / circular color palette |
 | `Escape` | Clear selection / cancel and exit |
 
 ---
@@ -123,35 +126,35 @@ general:
   auto_copy_on_save: true
   close_after_action: true
   show_notifications: true
-  dim_opacity: 175
+  dim_opacity: 190
   magnifier_enabled: true
-  magnifier_zoom: 8
-  magnifier_size: 11
+  magnifier_zoom: 10
+  magnifier_size: 17
 
 theme:
   background: "#282828"
   foreground: "#ebdbb2"
-  accent: "#fe8019"
-  selection_border: "#fabd2f"
-  handle_color: "#fe8019"
+  accent: "#b8bb26"
+  selection_border: "#b8bb26"
+  handle_color: "#b8bb26"
   font_family: "JetBrainsMono Nerd Font"
-  default_color: "#cc241d"
+  default_color: "#b8bb26"
   default_thickness: 3
   swatches:
-    - "#cc241d" # Red
-    - "#98971a" # Green
-    - "#d79921" # Yellow
-    - "#458588" # Blue
-    - "#b16286" # Purple
-    - "#689d6a" # Aqua
+    - "#b8bb26" # Green
+    - "#fabd2f" # Yellow
     - "#fe8019" # Orange
+    - "#fb4934" # Red
+    - "#d3869b" # Purple
+    - "#83a598" # Blue
+    - "#8ec07c" # Aqua
     - "#ebdbb2" # Light
     - "#282828" # Dark
     - "#928374" # Gray
 
 tools:
   initial_tool: selection
-  arrow_style: curved
+  arrow_style: classic
   counter_start: 1
   pixelate_block_size: 10
   blur_radius: 8
@@ -161,26 +164,21 @@ shortcuts:
     selection: s
     arrow: a
     rectangle: r
+    rect_filled: f
     circle: c
     pencil: p
     marker: m
     text: t
     counter: n
     pixelate: b
+    blur: u
     invert: i
     copy: ctrl+c
     save: ctrl+s
     pin: space
     undo: ctrl+z
-    redo: ctrl+shift+z
+    redo: ctrl+y
     select_all: ctrl+a
     cancel: escape
     confirm: enter
-    toggle_help: question
 ```
-
----
-
-## License
-
-GPL-3.0-or-later.

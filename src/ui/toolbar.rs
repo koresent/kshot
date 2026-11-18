@@ -145,7 +145,7 @@ impl ToolbarManager {
         let margin = 10.0;
         let pad = 8.0;
 
-        // 1. TOP BAR (Pin, Confirm, Cancel, Save)
+        // Top bar
         let top_count = self.top_buttons.len() as f32;
         let top_w = (top_count - 1.0) * spacing;
         let mut top_x = sel.x + (sel.w - top_w) * 0.5;
@@ -153,7 +153,6 @@ impl ToolbarManager {
 
         let mut top_y = sel.y - margin - r;
         if top_y - r < pad {
-            // Flip inside selection
             top_y = sel.y + margin + r;
         }
 
@@ -162,7 +161,7 @@ impl ToolbarManager {
             btn.center_y = top_y;
         }
 
-        // 2. BOTTOM BAR (Pencil, Line, Arrow, Rect, RectFilled, Circle, Marker, Text, Counter)
+        // Bottom bar
         let bot_count = self.bottom_buttons.len() as f32;
         let bot_w = (bot_count - 1.0) * spacing;
         let mut bot_x = sel.x + (sel.w - bot_w) * 0.5;
@@ -170,7 +169,6 @@ impl ToolbarManager {
 
         let mut bot_y = sel.y + sel.h + margin + r;
         if bot_y + r > screen_h - pad {
-            // Flip inside selection
             bot_y = sel.y + sel.h - margin - r;
         }
 
@@ -179,7 +177,7 @@ impl ToolbarManager {
             btn.center_y = bot_y;
         }
 
-        // 3. RIGHT BAR (Copy, Redo, Undo, Move, SizeBadge, Blur, Pixelate)
+        // Right bar
         let total_right_slots = 7.0;
         let right_h = (total_right_slots - 1.0) * spacing;
         let mut right_y = sel.y + (sel.h - right_h) * 0.5;
@@ -187,7 +185,6 @@ impl ToolbarManager {
 
         let mut right_x = sel.x + sel.w + margin + r;
         if right_x + r > screen_w - pad {
-            // Flip inside selection
             right_x = sel.x + sel.w - margin - r;
         }
 

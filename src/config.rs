@@ -293,7 +293,7 @@ impl Config {
                 let _ = fs::create_dir_all(parent);
             }
             if let Ok(yaml) = serde_yaml::to_string(&default_cfg) {
-                let header = "# kshot configuration — native Wayland screenshot & annotation tool\n# Generated automatically with Gruvbox Dark defaults\n\n";
+                let header = "# kshot configuration: native Wayland screenshot & annotation tool\n# Generated automatically with Gruvbox Dark defaults\n\n";
                 let full = format!("{}{}", header, yaml);
                 let _ = fs::write(&path, full);
             }

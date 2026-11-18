@@ -688,7 +688,6 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                 if button == 0x110 {
                     // Left mouse button
                     if pressed {
-                        // 1. Color Wheel Interaction (Flameshot circular palette)
                         if state.color_wheel.visible {
                             if let Some(chosen) = state.color_wheel.handle_click(px, py) {
                                 state.toolbar.set_active_color(chosen);
@@ -699,7 +698,6 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                             return;
                         }
 
-                        // 2. Active Text Input Commit on Click
                         if state.canvas.active_text_input.is_some() {
                             state.commit_active_text();
                             if state.active_tool != ToolType::Text {
@@ -708,7 +706,6 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                             }
                         }
 
-                        // 3. Check Toolbar click
                         if let Some(btn_id) = state.toolbar.handle_click(px, py) {
                             match btn_id {
                                 ButtonId::ActionConfirm | ButtonId::ActionCopy => {
@@ -763,7 +760,6 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                             return;
                         }
 
-                        // 4. Check Selection handle hit
                         if let Some(ref sel) = state.canvas.selection {
                             if let Some(h) = sel.hit_handle(px, py, 10.0) {
                                 state.drag_mode = DragMode::ResizingSelection { handle: h };
@@ -772,7 +768,6 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                             }
                         }
 
-                        // 5. Check Double Click for Full Screen
                         let now = std::time::Instant::now();
                         let is_double_click = if let Some((prev_time, prev_x, prev_y)) = state.last_click {
                             now.duration_since(prev_time).as_millis() < 350
@@ -801,7 +796,6 @@ impl Dispatch<wl_pointer::WlPointer, ()> for GuiSession {
                         }
                         state.last_click = Some((now, px, py));
 
-                        // 6. Check Inside Selection or Create New Selection / Tools
                         let inside_sel = state.canvas.selection.as_ref().map(|s| s.contains(px, py)).unwrap_or(false);
 
                         if state.active_tool == ToolType::Selection {
@@ -1017,21 +1011,21 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for GuiSession {
                 }
                 current_shortcut.push_str(&key_name);
 
-                // 1. Actions (Undo, Redo, Copy, Save, Cancel, Confirm, Pin, Select All)
+                // Actions (Undo, Redo, Copy, Save, Cancel, Confirm, Pin, Select All)
                 let is_undo = state.config.matches_shortcut("undo", &current_shortcut)
-                    || (state.ctrl_held && !state.shift_held && (key == 44 || key_name == "z" || key_name == "я"));
+                    || (state.ctrl_held && !state.shift_held && (key == 44 || key_name == "z"));
 
                 let is_redo = state.config.matches_shortcut("redo", &current_shortcut)
-                    || (state.ctrl_held && (key == 21 || key_name == "y" || key_name == "н" || (state.shift_held && (key == 44 || key_name == "z" || key_name == "я"))));
+                    || (state.ctrl_held && (key == 21 || key_name == "y" || (state.shift_held && (key == 44 || key_name == "z"))));
 
                 let is_copy = state.config.matches_shortcut("copy", &current_shortcut)
-                    || (state.ctrl_held && (key == 46 || key_name == "c" || key_name == "с"));
+                    || (state.ctrl_held && (key == 46 || key_name == "c"));
 
                 let is_save = state.config.matches_shortcut("save", &current_shortcut)
-                    || (state.ctrl_held && (key == 31 || key_name == "s" || key_name == "ы"));
+                    || (state.ctrl_held && (key == 31 || key_name == "s"));
 
                 let is_select_all = state.config.matches_shortcut("select_all", &current_shortcut)
-                    || (state.ctrl_held && (key == 30 || key_name == "a" || key_name == "ф"));
+                    || (state.ctrl_held && (key == 30 || key_name == "a"));
 
                 let is_cancel = state.config.matches_shortcut("cancel", &current_shortcut)
                     || key == 1
@@ -1097,7 +1091,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for GuiSession {
                         state.height as f32,
                     );
                 } else if !state.ctrl_held {
-                    // 2. Tool switches (configurable via YAML shortcuts.bindings)
+                    // Tool switches
                     if state.config.matches_shortcut("selection", &current_shortcut) || key == 31 || key_name == "s" {
                         state.active_tool = ToolType::Selection;
                         state.toolbar.set_active_tool(ButtonId::ToolSelection);
@@ -1134,7 +1128,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for GuiSession {
                     }
                 }
 
-                // 3. Arrow Keys: Nudge selection
+                // Arrow keys nudge selection
                 match key {
                     103 => {
                         if let Some(ref mut sel) = state.canvas.selection {

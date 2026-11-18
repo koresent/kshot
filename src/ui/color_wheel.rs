@@ -111,7 +111,6 @@ impl ColorWheel {
         let bg_radius = self.ring_radius + self.swatch_radius + 10.0;
         let bg_d = bg_radius * 2.0;
 
-        // 1. Draw circular background backdrop
         if let Some(bg_rect) = tiny_skia::Rect::from_xywh(
             self.center_x - bg_radius,
             self.center_y - bg_radius,
@@ -119,29 +118,25 @@ impl ColorWheel {
             bg_d,
         ) {
             if let Some(path) = PathBuilder::from_oval(bg_rect) {
-                // Drop shadow
                 let mut shadow_paint = Paint::default();
                 shadow_paint.set_color_rgba8(20, 20, 20, 140);
                 shadow_paint.anti_alias = true;
                 let shadow_stroke = Stroke { width: 4.0, ..Default::default() };
                 pixmap.stroke_path(&path, &shadow_paint, &shadow_stroke, Transform::identity(), None);
 
-                // Backdrop fill
                 let mut bg_paint = Paint::default();
-                bg_paint.set_color_rgba8(40, 40, 40, 245); // Gruvbox dark
+                bg_paint.set_color_rgba8(40, 40, 40, 245);
                 bg_paint.anti_alias = true;
                 pixmap.fill_path(&path, &bg_paint, tiny_skia::FillRule::Winding, Transform::identity(), None);
 
-                // Backdrop border
                 let mut border_paint = Paint::default();
-                border_paint.set_color_rgba8(80, 73, 69, 255); // #504945
+                border_paint.set_color_rgba8(80, 73, 69, 255);
                 border_paint.anti_alias = true;
                 let stroke = Stroke { width: 1.5, ..Default::default() };
                 pixmap.stroke_path(&path, &border_paint, &stroke, Transform::identity(), None);
             }
         }
 
-        // 2. Draw Center Current Color Preview Disk
         let center_disk_radius = 16.0;
         if let Some(cdr) = tiny_skia::Rect::from_xywh(
             self.center_x - center_disk_radius,
@@ -162,7 +157,6 @@ impl ColorWheel {
             }
         }
 
-        // 3. Draw Color Swatches around the Ring
         let centers = self.swatch_centers();
         for (i, (sx, sy)) in centers.into_iter().enumerate() {
             let swatch_color = self.swatches[i];
