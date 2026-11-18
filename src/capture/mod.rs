@@ -1,6 +1,59 @@
 use crate::error::{KshotError, Result};
+use std::fs;
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use tiny_skia::Pixmap;
+
+pub fn detect_focused_output() -> Option<String> {
+    let uid = unsafe { libc::getuid() };
+    let preferred = PathBuf::from(format!("/run/user/{uid}/umbriel-wayland-0.sock"));
+    let sock_path = if preferred.exists() {
+        Some(preferred)
+    } else {
+        let user_run = format!("/run/user/{uid}");
+        if let Ok(entries) = fs::read_dir(user_run) {
+            entries
+                .flatten()
+                .map(|e| e.path())
+                .find(|p| {
+                    p.file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|s| s.starts_with("umbriel-") && s.ends_with(".sock"))
+                        .unwrap_or(false)
+                })
+        } else {
+            None
+        }
+    };
+
+    if let Some(path) = sock_path {
+        if let Ok(mut stream) = UnixStream::connect(path) {
+            let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(300)));
+            let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(300)));
+            if stream.write_all(b"{\"cmd\":\"outputs\"}\n").is_ok() {
+                let mut reader = BufReader::new(stream);
+                let mut line = String::new();
+                if reader.read_line(&mut line).is_ok() {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
+                        if let Some(outputs) = val.get("ok").and_then(|v| v.as_array()) {
+                            for o in outputs {
+                                if o.get("focused").and_then(|f| f.as_bool()).unwrap_or(false) {
+                                    if let Some(name) = o.get("name").and_then(|n| n.as_str()) {
+                                        return Some(name.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
 
 #[derive(Clone)]
 pub struct CaptureFrame {
@@ -60,9 +113,10 @@ impl CaptureFrame {
     }
 }
 
-pub fn capture_screen(output_name: Option<&str>) -> Result<CaptureFrame> {
+pub fn capture_screen(output_name: Option<&str>) -> Result<(CaptureFrame, Option<String>)> {
+    let target_out = output_name.map(|s| s.to_string()).or_else(detect_focused_output);
     let mut cmd = Command::new("grim");
-    if let Some(out) = output_name {
+    if let Some(ref out) = target_out {
         cmd.args(["-o", out]);
     }
     cmd.args(["-t", "ppm", "-"]);
@@ -82,7 +136,8 @@ pub fn capture_screen(output_name: Option<&str>) -> Result<CaptureFrame> {
         return Err(KshotError::CaptureFailed(format!("grim failed: {err}")));
     }
 
-    parse_ppm_to_frame(&output.stdout)
+    let frame = parse_ppm_to_frame(&output.stdout)?;
+    Ok((frame, target_out))
 }
 
 pub fn normalize_geometry_for_grim(geometry: &str) -> String {

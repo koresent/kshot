@@ -46,6 +46,7 @@ pub struct GuiSession {
     pub pointer: Option<wl_pointer::WlPointer>,
     pub keyboard: Option<wl_keyboard::WlKeyboard>,
     pub outputs: Vec<(wl_output::WlOutput, Option<String>)>,
+    pub target_output_name: Option<String>,
 
     pub surface: Option<wl_surface::WlSurface>,
     pub layer_surface: Option<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
@@ -61,6 +62,7 @@ pub struct GuiSession {
 impl GuiSession {
     pub fn new(
         frame: CaptureFrame,
+        target_output_name: Option<String>,
         config: Config,
         gui_args: GuiArgs,
         running: Arc<AtomicBool>,
@@ -114,6 +116,7 @@ impl GuiSession {
             pointer: None,
             keyboard: None,
             outputs: Vec::new(),
+            target_output_name,
 
             surface: None,
             layer_surface: None,
@@ -304,9 +307,10 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for GuiSession {
             zwlr_layer_surface_v1::Event::Configure { serial, width, height } => {
                 surface.ack_configure(serial);
                 state.configured = true;
-                if width > 0 && height > 0 {
+                if width > 0 && height > 0 && (width != state.width || height != state.height) {
                     state.width = width;
                     state.height = height;
+                    state.shm_buffers = None;
                 }
                 state.render_frame(qh);
             }
@@ -672,6 +676,11 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for GuiSession {
                             return;
                         }
                     }
+                    16 => {
+                        // Q / q: exit immediately
+                        state.running.store(false, Ordering::SeqCst);
+                        return;
+                    }
                     28 => {
                         // Enter: confirm & export
                         state.finish_and_export(true, false);
@@ -817,13 +826,20 @@ impl Dispatch<wl_seat::WlSeat, ()> for GuiSession {
 
 impl Dispatch<wl_output::WlOutput, ()> for GuiSession {
     fn event(
-        _state: &mut Self,
-        _output: &wl_output::WlOutput,
-        _event: wl_output::Event,
+        state: &mut Self,
+        output: &wl_output::WlOutput,
+        event: wl_output::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
+        if let wl_output::Event::Name { name } = event {
+            for (out, out_name) in &mut state.outputs {
+                if out == output {
+                    *out_name = Some(name.clone());
+                }
+            }
+        }
     }
 }
 

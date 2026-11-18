@@ -18,6 +18,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 
 # Configuration & CLI
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 serde_yaml = "0.9"
 clap = { version = "4.5", features = ["derive"] }
 chrono = "0.4"

@@ -24,15 +24,15 @@ fn main() -> Result<()> {
             if gui_args.delay > 0 {
                 std::thread::sleep(Duration::from_millis(gui_args.delay));
             }
-            let frame = capture::capture_screen(None)?;
-            wayland::run_gui(frame, config, gui_args)?;
+            let (frame, target_output) = capture::capture_screen(None)?;
+            wayland::run_gui(frame, target_output, config, gui_args)?;
         }
 
         Commands::Screen(screen_args) => {
             if screen_args.delay > 0 {
                 std::thread::sleep(Duration::from_millis(screen_args.delay));
             }
-            let frame = capture::capture_screen(screen_args.output.as_deref())?;
+            let (frame, target_output) = capture::capture_screen(screen_args.output.as_deref())?;
 
             if screen_args.edit {
                 let gui_args = GuiArgs {
@@ -44,7 +44,7 @@ fn main() -> Result<()> {
                     pin: false,
                     accept_on_select: false,
                 };
-                wayland::run_gui(frame, config, gui_args)?;
+                wayland::run_gui(frame, target_output, config, gui_args)?;
             } else {
                 let png_bytes = frame.to_png_bytes()?;
                 if screen_args.clipboard {

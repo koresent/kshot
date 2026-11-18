@@ -7,18 +7,28 @@ use crate::capture::CaptureFrame;
 use crate::cli::GuiArgs;
 use crate::config::Config;
 use crate::error::{KshotError, Result};
-use std::os::fd::{AsFd, AsRawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use wayland_client::Connection;
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
-pub fn run_gui(frame: CaptureFrame, config: Config, gui_args: GuiArgs) -> Result<()> {
+pub fn run_gui(
+    frame: CaptureFrame,
+    target_output_name: Option<String>,
+    config: Config,
+    gui_args: GuiArgs,
+) -> Result<()> {
     let conn = Connection::connect_to_env()
         .map_err(|e| KshotError::WaylandConnection(format!("Cannot connect to Wayland display: {e}")))?;
 
     let running = Arc::new(AtomicBool::new(true));
-    let mut session = GuiSession::new(frame, config, gui_args, Arc::clone(&running));
+    let mut session = GuiSession::new(
+        frame,
+        target_output_name.clone(),
+        config,
+        gui_args,
+        Arc::clone(&running),
+    );
 
     let mut event_queue = conn.new_event_queue();
     let qh = event_queue.handle();
@@ -31,6 +41,12 @@ pub fn run_gui(frame: CaptureFrame, config: Config, gui_args: GuiArgs) -> Result
         .roundtrip(&mut session)
         .map_err(|e| KshotError::WaylandProtocol(format!("Initial roundtrip failed: {e}")))?;
 
+    // Second roundtrip to ensure wl_output::name events are processed
+    let _ = conn.flush();
+    event_queue
+        .roundtrip(&mut session)
+        .map_err(|e| KshotError::WaylandProtocol(format!("Output name roundtrip failed: {e}")))?;
+
     let compositor = session
         .compositor
         .clone()
@@ -41,18 +57,35 @@ pub fn run_gui(frame: CaptureFrame, config: Config, gui_args: GuiArgs) -> Result
         .clone()
         .ok_or_else(|| KshotError::WaylandProtocol("Compositor does not support zwlr_layer_shell_v1".into()))?;
 
+    // Find the wl_output corresponding to the target monitor name
+    let matched_output = session
+        .target_output_name
+        .as_ref()
+        .and_then(|target| {
+            session.outputs.iter().find_map(|(out, name)| {
+                if name.as_deref() == Some(target.as_str()) {
+                    Some(out.clone())
+                } else {
+                    None
+                }
+            })
+        })
+        .or_else(|| session.outputs.first().map(|(out, _)| out.clone()));
+
     let surface = compositor.create_surface(&qh, ());
 
     let layer_surface = layer_shell.get_layer_surface(
         &surface,
-        None, // Fullscreen across active output / compositor canvas
+        matched_output.as_ref(),
         zwlr_layer_shell_v1::Layer::Overlay,
         "kshot".to_string(),
         &qh,
         (),
     );
 
-    layer_surface.set_size(session.width, session.height);
+    // Using (0, 0) with all 4 anchors instructs layer-shell to size the surface
+    // to fill the target output completely.
+    layer_surface.set_size(0, 0);
     layer_surface.set_anchor(
         zwlr_layer_surface_v1::Anchor::Top
             | zwlr_layer_surface_v1::Anchor::Bottom
@@ -69,26 +102,10 @@ pub fn run_gui(frame: CaptureFrame, config: Config, gui_args: GuiArgs) -> Result
 
     let _ = conn.flush();
 
-    let conn_fd = conn.as_fd();
-
     while running.load(Ordering::SeqCst) {
-        let _ = event_queue.dispatch_pending(&mut session);
-
-        let mut pollfd = libc::pollfd {
-            fd: conn_fd.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        };
-
-        unsafe {
-            libc::poll(&mut pollfd, 1, 16);
+        if event_queue.blocking_dispatch(&mut session).is_err() {
+            break;
         }
-
-        if let Some(guard) = event_queue.prepare_read() {
-            let _ = guard.read();
-        }
-
-        let _ = conn.flush();
     }
 
     Ok(())

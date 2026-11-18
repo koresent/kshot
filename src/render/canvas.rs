@@ -45,12 +45,27 @@ impl Canvas {
         toolbar: &ToolbarManager,
         config: &Config,
     ) {
+        let target_w = target.width();
+        let target_h = target.height();
         let target_data = target.data_mut();
         let src_data = self.base_frame.pixmap.data();
 
-        // 1. Copy base frozen frame
-        let len = (self.width as usize * self.height as usize * 4).min(target_data.len());
-        target_data[..len].copy_from_slice(&src_data[..len]);
+        // 1. Copy base frozen frame line by line
+        let copy_w = (target_w.min(self.base_frame.width)) as usize;
+        let copy_h = (target_h.min(self.base_frame.height)) as usize;
+        let dst_stride = target_w as usize * 4;
+        let src_stride = self.base_frame.width as usize * 4;
+
+        for row in 0..copy_h {
+            let src_start = row * src_stride;
+            let src_end = src_start + copy_w * 4;
+            let dst_start = row * dst_stride;
+            let dst_end = dst_start + copy_w * 4;
+
+            if src_end <= src_data.len() && dst_end <= target_data.len() {
+                target_data[dst_start..dst_end].copy_from_slice(&src_data[src_start..src_end]);
+            }
+        }
 
         // 2. Render committed annotations onto canvas
         for item in self.annotations.items() {
@@ -130,13 +145,7 @@ impl Canvas {
                         target.fill_rect(r, &paint, Transform::identity(), None);
                     }
                 }
-                return;
             }
-        }
-
-        // Full dim if no selection
-        if let Some(r) = tiny_skia::Rect::from_xywh(0.0, 0.0, w, h) {
-            target.fill_rect(r, &paint, Transform::identity(), None);
         }
     }
 
