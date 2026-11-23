@@ -1,0 +1,88 @@
+# kshot configuration file (YAML)
+# Location: ~/.config/kshot/config.yaml
+
+general:
+  # Destination directory for saved captures
+  save_path: ~/Pictures/Screenshots
+
+  # Strftime pattern for generated filenames
+  filename_pattern: Screenshot_%Y-%m-%d_%H-%M-%S.png
+
+  # Copy image to system clipboard when saving to file
+  auto_copy_on_save: true
+
+  # Close kshot after copying or saving
+  close_after_action: true
+
+  # Display desktop notifications on capture events
+  show_notifications: true
+
+  # Dimmed backdrop opacity outside the selection area (0-255)
+  dim_opacity: 190
+
+  # Circular pixel magnifier around the cursor
+  magnifier_enabled: false
+  magnifier_zoom: 8
+  magnifier_size: 11
+
+theme:
+  # Gruvbox Dark aesthetic
+  background: "#282828"
+  foreground: "#ebdbb2"
+  accent: "#b8bb26"
+  selection_border: "#b8bb26"
+  handle_color: "#b8bb26"
+  font_family: "JetBrainsMono Nerd Font"
+  default_color: "#b8bb26"
+  default_thickness: 3
+  swatches:
+    - "#b8bb26" # Gruvbox Green
+    - "#fabd2f" # Gruvbox Yellow
+    - "#fe8019" # Gruvbox Orange
+    - "#fb4934" # Gruvbox Red
+    - "#d3869b" # Gruvbox Purple
+    - "#83a598" # Gruvbox Blue
+    - "#8ec07c" # Gruvbox Aqua
+    - "#ebdbb2" # Light Foreground
+    - "#282828" # Dark Background
+    - "#928374" # Gray
+
+tools:
+  # Default active tool on launch: selection, arrow, rectangle, rect_filled, circle, pencil, marker, text, counter, pixelate, blur, invert
+  initial_tool: selection
+
+  # Arrowhead drawing style: curved or classic
+  arrow_style: curved
+
+  # Starting number for the step counter tool
+  counter_start: 1
+
+  # Block size in pixels for pixelate redaction
+  pixelate_block_size: 10
+
+  # Blur radius in pixels for Gaussian blur redaction
+  blur_radius: 8
+
+shortcuts:
+  bindings:
+    selection: s
+    arrow: a
+    rectangle: r
+    rect_filled: f
+    circle: c
+    pencil: p
+    marker: m
+    text: t
+    counter: n
+    pixelate: b
+    blur: u
+    invert: i
+    copy: ctrl+c
+    save: ctrl+s
+    pin: space
+    undo: ctrl+z
+    redo: ctrl+y
+    select_all: ctrl+a
+    cancel: escape
+    confirm: enter
+    toggle_help: question
