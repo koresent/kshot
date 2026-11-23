@@ -1,3 +1,9 @@
+pub mod scroll;
+pub mod window;
+
+pub use scroll::run_scroll_capture;
+pub use window::run_window_capture;
+
 use crate::error::{KshotError, Result};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -103,6 +109,16 @@ impl CaptureFrame {
         }
 
         Ok(CaptureFrame::new(available_w, available_h, cropped))
+    }
+
+    /// Beautify the frame by applying soft shadow, rounded corners, and padding
+    pub fn beautify(&mut self, radius: f32, padding: u32) -> Result<()> {
+        let beautified = crate::render::beautify_pixmap(&self.pixmap, radius, padding)
+            .ok_or_else(|| KshotError::CaptureFailed("Failed to beautify capture frame".into()))?;
+        self.width = beautified.width();
+        self.height = beautified.height();
+        self.pixmap = beautified;
+        Ok(())
     }
 
     /// Encode the frame to PNG bytes

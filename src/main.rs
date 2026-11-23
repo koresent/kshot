@@ -13,7 +13,75 @@ use cli::{Cli, Commands, GuiArgs};
 use config::Config;
 use error::Result;
 use export::{copy_png_to_clipboard, save_image_to_file, send_clipboard_notification};
+use std::process::Command;
 use std::time::Duration;
+use ui::hud::HudAction;
+
+fn export_capture_frame(
+    mut frame: capture::CaptureFrame,
+    pretty: bool,
+    clipboard: bool,
+    path: Option<&std::path::Path>,
+    config: &Config,
+) -> Result<()> {
+    if pretty {
+        frame.beautify(12.0, 40)?;
+    }
+    let png_bytes = frame.to_png_bytes()?;
+    if clipboard {
+        copy_png_to_clipboard(&png_bytes)?;
+        if config.general.show_notifications {
+            send_clipboard_notification();
+        }
+    }
+    if path.is_some() || !clipboard {
+        save_image_to_file(&png_bytes, path, config)?;
+    }
+    Ok(())
+}
+
+fn execute_hud_action(action: HudAction, pretty: bool, config: &Config) -> Result<()> {
+    match action {
+        HudAction::Area => {
+            let (mut frame, target_output) = capture::capture_screen(None)?;
+            if pretty {
+                frame.beautify(12.0, 40)?;
+            }
+            let gui_args = GuiArgs {
+                pretty,
+                ..Default::default()
+            };
+            wayland::run_gui(frame, target_output, config.clone(), gui_args)?;
+        }
+        HudAction::Window => {
+            if let Some(frame) = capture::run_window_capture(None)? {
+                export_capture_frame(frame, pretty, true, None, config)?;
+            }
+        }
+        HudAction::Screen => {
+            let (frame, _) = capture::capture_screen(None)?;
+            export_capture_frame(frame, pretty, true, None, config)?;
+        }
+        HudAction::Scroll => {
+            if let Some(frame) = capture::run_scroll_capture(None)? {
+                export_capture_frame(frame, pretty, true, None, config)?;
+            }
+        }
+        HudAction::Picker => {
+            let _ = Command::new("cpick").spawn();
+        }
+        HudAction::Ruler => {
+            let _ = Command::new("ruler").spawn();
+        }
+        HudAction::Scanner => {
+            let _ = Command::new("qscan").spawn();
+        }
+        HudAction::Ocr => {
+            let _ = Command::new("ocr-screen").spawn();
+        }
+    }
+    Ok(())
+}
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -24,8 +92,61 @@ fn main() -> Result<()> {
             if gui_args.delay > 0 {
                 std::thread::sleep(Duration::from_millis(gui_args.delay));
             }
-            let (frame, target_output) = capture::capture_screen(None)?;
+            let (mut frame, target_output) = capture::capture_screen(None)?;
+            if gui_args.pretty {
+                frame.beautify(12.0, 40)?;
+            }
             wayland::run_gui(frame, target_output, config, gui_args)?;
+        }
+
+        Commands::Hud(hud_args) => {
+            if let Some(action) = ui::run_hud(hud_args.pretty)? {
+                execute_hud_action(action, hud_args.pretty, &config)?;
+            }
+        }
+
+        Commands::Window(win_args) => {
+            if let Some(frame) = capture::run_window_capture(None)? {
+                if win_args.edit {
+                    let gui_args = GuiArgs {
+                        path: win_args.path,
+                        clipboard: win_args.clipboard,
+                        pretty: win_args.pretty,
+                        ..Default::default()
+                    };
+                    wayland::run_gui(frame, None, config, gui_args)?;
+                } else {
+                    export_capture_frame(
+                        frame,
+                        win_args.pretty,
+                        win_args.clipboard,
+                        win_args.path.as_deref(),
+                        &config,
+                    )?;
+                }
+            }
+        }
+
+        Commands::Scroll(scroll_args) => {
+            if let Some(frame) = capture::run_scroll_capture(scroll_args.geometry.as_deref())? {
+                if scroll_args.edit {
+                    let gui_args = GuiArgs {
+                        path: scroll_args.path,
+                        clipboard: !scroll_args.no_copy,
+                        pretty: scroll_args.pretty,
+                        ..Default::default()
+                    };
+                    wayland::run_gui(frame, None, config, gui_args)?;
+                } else {
+                    export_capture_frame(
+                        frame,
+                        scroll_args.pretty,
+                        !scroll_args.no_copy,
+                        scroll_args.path.as_deref(),
+                        &config,
+                    )?;
+                }
+            }
         }
 
         Commands::Screen(screen_args) => {
@@ -43,34 +164,29 @@ fn main() -> Result<()> {
                     raw: false,
                     pin: false,
                     accept_on_select: false,
+                    pretty: screen_args.pretty,
                 };
                 wayland::run_gui(frame, target_output, config, gui_args)?;
             } else {
-                let png_bytes = frame.to_png_bytes()?;
-                if screen_args.clipboard {
-                    copy_png_to_clipboard(&png_bytes)?;
-                    if config.general.show_notifications {
-                        send_clipboard_notification();
-                    }
-                }
-                if screen_args.path.is_some() || !screen_args.clipboard {
-                    save_image_to_file(&png_bytes, screen_args.path.as_deref(), &config)?;
-                }
+                export_capture_frame(
+                    frame,
+                    screen_args.pretty,
+                    screen_args.clipboard,
+                    screen_args.path.as_deref(),
+                    &config,
+                )?;
             }
         }
 
         Commands::Area(area_args) => {
             let frame = capture::capture_geometry(&area_args.geometry)?;
-            let png_bytes = frame.to_png_bytes()?;
-            if area_args.clipboard {
-                copy_png_to_clipboard(&png_bytes)?;
-                if config.general.show_notifications {
-                    send_clipboard_notification();
-                }
-            }
-            if area_args.path.is_some() || !area_args.clipboard {
-                save_image_to_file(&png_bytes, area_args.path.as_deref(), &config)?;
-            }
+            export_capture_frame(
+                frame,
+                area_args.pretty,
+                area_args.clipboard,
+                area_args.path.as_deref(),
+                &config,
+            )?;
         }
 
         Commands::Pin(pin_args) => {

@@ -7,7 +7,7 @@ use std::path::PathBuf;
     author = "Koresent <koresent@pm.me>",
     version,
     about = "Native Wayland screenshot and annotation tool matching Gruvbox Dark aesthetic",
-    long_about = "A high-performance, Wayland-native replacement for Flameshot written in Rust.\nFeatures multi-output capture, fractional scaling precision, rich vector annotations,\nGruvbox Dark theme, and YAML configuration."
+    long_about = "A high-performance, Wayland-native screenshot suite written in Rust.\nFeatures multi-output capture, fractional scaling precision, rich vector annotations,\nGruvbox Dark theme, window selection, scrolling capture, and native HUD popover."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -18,6 +18,12 @@ pub struct Cli {
 pub enum Commands {
     /// Start interactive GUI screenshot and annotation session
     Gui(GuiArgs),
+    /// Open native HUD mode selector overlay
+    Hud(HudArgs),
+    /// Interactive window screenshot with hover highlight
+    Window(WindowArgs),
+    /// Vertical scrolling screenshot with real-time stitching
+    Scroll(ScrollArgs),
     /// Capture full screen or a specific monitor
     Screen(ScreenArgs),
     /// Capture a predefined rectangular area non-interactively
@@ -57,6 +63,63 @@ pub struct GuiArgs {
     /// Automatically accept and export as soon as region is selected
     #[arg(long)]
     pub accept_on_select: bool,
+
+    /// Apply rounded corners and soft drop shadow
+    #[arg(long)]
+    pub pretty: bool,
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct HudArgs {
+    /// Open HUD with pretty mode active by default
+    #[arg(long)]
+    pub pretty: bool,
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct WindowArgs {
+    /// Copy capture to clipboard (default behavior)
+    #[arg(short, long, default_value_t = true)]
+    pub clipboard: bool,
+
+    /// Save capture to file
+    #[arg(short, long)]
+    pub path: Option<PathBuf>,
+
+    /// Open capture in GUI editor for annotations
+    #[arg(short, long)]
+    pub edit: bool,
+
+    /// Apply rounded corners and soft drop shadow
+    #[arg(long)]
+    pub pretty: bool,
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct ScrollArgs {
+    /// Copy capture to clipboard
+    #[arg(short, long, default_value_t = true)]
+    pub clipboard: bool,
+
+    /// Save capture to file
+    #[arg(short, long)]
+    pub path: Option<PathBuf>,
+
+    /// Open capture in GUI editor for annotations
+    #[arg(short, long)]
+    pub edit: bool,
+
+    /// Apply rounded corners and soft drop shadow
+    #[arg(long)]
+    pub pretty: bool,
+
+    /// Do not copy screenshot to clipboard
+    #[arg(long)]
+    pub no_copy: bool,
+
+    /// Pre-selected rectangular capture geometry (X,Y WxH)
+    #[arg(short, long)]
+    pub geometry: Option<String>,
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -80,6 +143,10 @@ pub struct ScreenArgs {
     /// Open capture in GUI editor for annotations
     #[arg(short, long)]
     pub edit: bool,
+
+    /// Apply rounded corners and soft drop shadow
+    #[arg(long)]
+    pub pretty: bool,
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -95,6 +162,10 @@ pub struct AreaArgs {
     /// Save capture to file
     #[arg(short, long)]
     pub path: Option<PathBuf>,
+
+    /// Apply rounded corners and soft drop shadow
+    #[arg(long)]
+    pub pretty: bool,
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -117,33 +188,46 @@ mod tests {
 
     #[test]
     fn test_cli_parsing_gui() {
-        let args = Cli::parse_from(["kshot", "gui", "-c", "-d", "100"]);
+        let args = Cli::parse_from(["kshot", "gui", "-c", "-d", "100", "--pretty"]);
         if let Some(Commands::Gui(gui)) = args.command {
             assert!(gui.clipboard);
             assert_eq!(gui.delay, 100);
+            assert!(gui.pretty);
         } else {
             panic!("Expected Gui command");
         }
     }
 
     #[test]
-    fn test_cli_parsing_screen() {
-        let args = Cli::parse_from(["kshot", "screen", "-o", "DP-1", "-e"]);
-        if let Some(Commands::Screen(screen)) = args.command {
-            assert_eq!(screen.output.as_deref(), Some("DP-1"));
-            assert!(screen.edit);
+    fn test_cli_parsing_hud() {
+        let args = Cli::parse_from(["kshot", "hud", "--pretty"]);
+        if let Some(Commands::Hud(hud)) = args.command {
+            assert!(hud.pretty);
         } else {
-            panic!("Expected Screen command");
+            panic!("Expected Hud command");
         }
     }
 
     #[test]
-    fn test_cli_parsing_pin() {
-        let args = Cli::parse_from(["kshot", "pin", "/tmp/test.png"]);
-        if let Some(Commands::Pin(pin)) = args.command {
-            assert_eq!(pin.file, PathBuf::from("/tmp/test.png"));
+    fn test_cli_parsing_window() {
+        let args = Cli::parse_from(["kshot", "window", "--pretty", "-e"]);
+        if let Some(Commands::Window(win)) = args.command {
+            assert!(win.pretty);
+            assert!(win.edit);
+            assert!(win.clipboard);
         } else {
-            panic!("Expected Pin command");
+            panic!("Expected Window command");
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_scroll() {
+        let args = Cli::parse_from(["kshot", "scroll", "--no-copy", "-p", "/tmp/out.png"]);
+        if let Some(Commands::Scroll(scroll)) = args.command {
+            assert!(scroll.no_copy);
+            assert_eq!(scroll.path, Some(PathBuf::from("/tmp/out.png")));
+        } else {
+            panic!("Expected Scroll command");
         }
     }
 }

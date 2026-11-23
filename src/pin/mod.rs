@@ -1,7 +1,7 @@
 use crate::capture::CaptureFrame;
 use crate::error::{KshotError, Result};
 use crate::export::copy_png_to_clipboard;
-use crate::wayland::shm::{create_shm_buffer, ShmBuffer};
+use crate::wayland::shm::{create_shm_buffer, copy_rgba_to_argb8888, ShmBuffer};
 use std::os::fd::{AsFd, AsRawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -88,11 +88,6 @@ impl PinSession {
         }
 
         let buf = self.shm_buffer.as_mut().unwrap();
-        let slice = unsafe { std::slice::from_raw_parts_mut(buf.mmap_ptr, buf.size) };
-        let mut target = match tiny_skia::PixmapMut::from_bytes(slice, self.width, self.height) {
-            Some(p) => p,
-            None => return,
-        };
 
         let mut temp = self.frame.pixmap.clone();
         if let Some(r) = tiny_skia::Rect::from_xywh(0.0, 0.0, self.width as f32, self.height as f32) {
@@ -105,8 +100,8 @@ impl PinSession {
             };
             temp.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
         }
-        let len = (self.width as usize * self.height as usize * 4).min(target.data_mut().len());
-        target.data_mut()[..len].copy_from_slice(&temp.data()[..len]);
+        let total_pixels = (self.width * self.height) as usize;
+        copy_rgba_to_argb8888(temp.data(), buf.mmap_ptr, total_pixels);
 
         if let Some(surf) = &self.surface {
             surf.attach(Some(&buf.buffer), 0, 0);

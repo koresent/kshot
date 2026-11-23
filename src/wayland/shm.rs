@@ -26,14 +26,14 @@ impl Drop for ShmBuffer {
     }
 }
 
-pub fn create_shm_buffer<T: 'static>(
+pub fn create_shm_buffer<T>(
     shm: &wl_shm::WlShm,
     qh: &QueueHandle<T>,
     width: u32,
     height: u32,
 ) -> Result<ShmBuffer, String>
 where
-    T: Dispatch<wl_shm_pool::WlShmPool, ()> + Dispatch<wl_buffer::WlBuffer, ()>,
+    T: Dispatch<wl_shm_pool::WlShmPool, ()> + Dispatch<wl_buffer::WlBuffer, ()> + 'static,
 {
     let stride = width * 4;
     let size = (stride * height) as usize;
@@ -87,4 +87,38 @@ where
         height,
         stride,
     })
+}
+
+/// Converts and copies tiny-skia RGBA bytes to Wayland wl_shm ARGB8888 (native little-endian BGRA).
+#[inline]
+pub fn copy_rgba_to_argb8888(src_rgba: &[u8], dst_ptr: *mut u8, num_pixels: usize) {
+    let src_u32 = unsafe { std::slice::from_raw_parts(src_rgba.as_ptr() as *const u32, num_pixels) };
+    let dst_u32 = unsafe { std::slice::from_raw_parts_mut(dst_ptr as *mut u32, num_pixels) };
+    for (s, d) in src_u32.iter().zip(dst_u32.iter_mut()) {
+        let px = *s;
+        let r = px & 0xFF;
+        let g = (px >> 8) & 0xFF;
+        let b = (px >> 16) & 0xFF;
+        let a = (px >> 24) & 0xFF;
+        *d = (a << 24) | (r << 16) | (g << 8) | b;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_copy_rgba_to_argb8888() {
+        // Red, Green, Blue, Alpha
+        let rgba = [0xb8u8, 0xbbu8, 0x26u8, 0xffu8]; // Gruvbox green
+        let mut dst = [0u8; 4];
+        copy_rgba_to_argb8888(&rgba, dst.as_mut_ptr(), 1);
+
+        // Wayland ARGB8888 little endian: [B, G, R, A]
+        assert_eq!(dst[0], 0x26); // Blue
+        assert_eq!(dst[1], 0xbb); // Green
+        assert_eq!(dst[2], 0xb8); // Red
+        assert_eq!(dst[3], 0xff); // Alpha
+    }
 }
