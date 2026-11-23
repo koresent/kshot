@@ -4,7 +4,7 @@ use crate::render::tools::{render_text, render_text_centered};
 use crate::wayland::shm::{create_shm_buffer, copy_rgba_to_argb8888, ShmBuffer};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tiny_skia::{Color, FillRule, Paint, PathBuilder, Pixmap, Stroke, Transform};
+use tiny_skia::{Color, FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, Stroke, Transform};
 use wayland_client::protocol::{
     wl_buffer, wl_compositor, wl_keyboard, wl_pointer, wl_registry, wl_seat, wl_shm,
     wl_shm_pool, wl_surface,
@@ -351,11 +351,15 @@ impl HudSession {
         }
     }
 
-    fn draw_mode_icon(&mut self, action: HudAction, x: f32, y: f32) {
+    pub fn draw_mode_icon(&mut self, action: HudAction, x: f32, y: f32) {
         let green = Color::from_rgba8(184, 187, 38, 255);
         let yellow = Color::from_rgba8(250, 189, 47, 255);
-        let mut stroke_green = Stroke::default();
-        stroke_green.width = 1.6;
+        let stroke_green = Stroke {
+            width: 1.5,
+            line_cap: LineCap::Round,
+            line_join: LineJoin::Round,
+            ..Default::default()
+        };
         let mut paint_green = Paint::default();
         paint_green.set_color(green);
         paint_green.anti_alias = true;
@@ -423,21 +427,38 @@ impl HudSession {
                 }
             }
             HudAction::Picker => {
+                // Squeeze bulb at top-right
+                let mut bulb_pb = PathBuilder::new();
+                bulb_pb.push_circle(x + 13.0, y + 5.0, 2.5);
+                if let Some(bp) = bulb_pb.finish() {
+                    self.render_buffer.fill_path(&bp, &paint_yellow, FillRule::Winding, Transform::identity(), None);
+                }
+
+                // Collar flange ring
+                let mut col_pb = PathBuilder::new();
+                col_pb.move_to(x + 8.0, y + 6.0);
+                col_pb.line_to(x + 12.0, y + 10.0);
+                if let Some(cp) = col_pb.finish() {
+                    self.render_buffer.stroke_path(&cp, &paint_green, &stroke_green, Transform::identity(), None);
+                }
+
+                // Pipette barrel and tapered tip
                 let mut pip_pb = PathBuilder::new();
-                pip_pb.move_to(x + 3.0, y + 15.0);
-                pip_pb.line_to(x + 7.0, y + 11.0);
-                pip_pb.line_to(x + 13.0, y + 5.0);
-                pip_pb.cubic_to(x + 15.0, y + 3.0, x + 16.0, y + 4.0, x + 14.0, y + 6.0);
-                pip_pb.line_to(x + 10.0, y + 10.0);
-                pip_pb.line_to(x + 6.0, y + 14.0);
+                pip_pb.move_to(x + 9.0, y + 7.0);
+                pip_pb.line_to(x + 5.0, y + 11.0);
+                pip_pb.line_to(x + 3.0, y + 15.0);
+                pip_pb.line_to(x + 7.0, y + 13.0);
+                pip_pb.line_to(x + 11.0, y + 9.0);
                 pip_pb.close();
                 if let Some(pp) = pip_pb.finish() {
                     self.render_buffer.stroke_path(&pp, &paint_green, &stroke_green, Transform::identity(), None);
                 }
-                let mut tip = PathBuilder::new();
-                tip.push_circle(x + 2.5, y + 15.5, 1.0);
-                if let Some(tp) = tip.finish() {
-                    self.render_buffer.fill_path(&tp, &paint_yellow, FillRule::Winding, Transform::identity(), None);
+
+                // Color droplet below the tip
+                let mut drop_pb = PathBuilder::new();
+                drop_pb.push_circle(x + 1.8, y + 16.2, 1.1);
+                if let Some(dp) = drop_pb.finish() {
+                    self.render_buffer.fill_path(&dp, &paint_yellow, FillRule::Winding, Transform::identity(), None);
                 }
             }
             HudAction::Ruler => {
@@ -880,6 +901,15 @@ mod tests {
                 badge_x,
                 badge_x - text_end
             );
+        }
+    }
+
+    #[test]
+    fn test_hud_draw_all_mode_icons() {
+        let running = Arc::new(AtomicBool::new(false));
+        let mut session = HudSession::new(false, running).expect("create hud session");
+        for mode in ALL_MODES {
+            session.draw_mode_icon(mode.action, 10.0, 10.0);
         }
     }
 }
